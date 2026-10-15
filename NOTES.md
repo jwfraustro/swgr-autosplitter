@@ -89,8 +89,8 @@ before trusting values.
 |---|---|---|
 | Race start (countdown over, go) | `ARacingGameState.bIsRaceStarted` 0→1; race state → `Racing` (5) | address verified, transition timing TBD |
 | Race start (alt: first line crossing) | player `CurrentLapNumber` 0→1 | verified (rules TBD) |
-| Lap split | player `CurrentLapNumber` increments (from 1 upward) | verified |
-| Race end (final-lap finish) | `UPlayerRaceEventComponent.bHasFinishedEvent` 0→1 | dump |
+| Lap split | player `CurrentLapNumber` increments n→n+1 for 1 ≤ n < LapCount | verified |
+| Race end (final-lap finish) | `bHasFinishedEvent` 0→1 (flips near-frame-perfect); `CurrentLapNumber` also ticks to LapCount+1 on the same crossing | verified |
 | Reset / left race | HUD lap counter goes undefined; player `CurrentLapNumber` → 0 | verified |
 
 Load removal (if needed later): race state `LoadingPhase` / `WaitForLevelToLoad`.
@@ -253,14 +253,14 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 
 - [ ] Which actor owns `UGameFlowStateMachineComponent`; confirm `CurrentStateId` tracks the enum above.
 - [x] `CurrentLapNumber` is 0 until the first line crossing (HUD counter starts at 1).
-- [ ] Does `CurrentLapNumber` tick on the final crossing too, or only `bHasFinishedEvent`?
-- [ ] Does `bHasFinishedEvent` flip exactly on the finish-line frame?
+- [x] `CurrentLapNumber` ticks on the final crossing too: ends at LapCount+1.
+- [x] `bHasFinishedEvent` flips near-perfectly on the finish crossing (revisit if timing drift shows up).
 - [ ] `bIsRaceFinished` — player finish or all racers?
 - [ ] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
 - [ ] Signatures for `GWorld` / `GEngine` in `SWGR-Win64-Shipping.exe` (UE5-style; verify the
       static address with UE4SS / Cheat Engine first, then write the sigscan).
 - [x] GWorld static address + GameState chains (RaceStartTime, bIsRaceStarted, LapCount) resolve live.
 - [x] Player race data and HUD VM chains resolve live.
-- [ ] Track internal name chain resolves live.
+- [ ] Track internal name chain (`GWorld, 0x1B0, 0x3D8, 0x28, 0x50`) not resolving yet — recheck (FString: ptr at +0x0, int32 len at +0x8).
 - [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
 - [ ] Pause flag for an optional "pausing stops timer" setting.
