@@ -12,3 +12,8 @@ watches/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Cheat Engine pointermaps, pointer files, etc.
+*.ptr
+*.ptrmap
+*.ct
