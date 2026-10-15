@@ -93,6 +93,12 @@ before trusting values.
 | Race end (final-lap finish) | `bHasFinishedEvent` 0→1 (flips near-frame-perfect); `CurrentLapNumber` also ticks to LapCount+1 on the same crossing | verified |
 | Reset / left race | HUD lap counter goes undefined; player `CurrentLapNumber` → 0 | verified |
 
+**Category note (verified in play):** Arcade races are a *rolling start* — the player only gets
+control of the speeder once they cross the start line. That makes "start on first line crossing"
+(`CurrentLapNumber` 0→1) the natural trigger for Arcade, while grid-start events fit "start on go"
+(`bIsRaceStarted` 0→1). Expect the start mode to be chosen per category (or per event type)
+rather than as a global setting — likely how the script settings / code end up being organised.
+
 Load removal (if needed later): race state `LoadingPhase` / `WaitForLevelToLoad`.
 
 ## Race flow state machine
