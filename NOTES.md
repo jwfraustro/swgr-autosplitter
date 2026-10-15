@@ -29,6 +29,20 @@ Takeaways from the Project Wingman script:
 
 Roots (to locate by sigscan): `GWorld` (UWorld*) and/or `GEngine` (UGameEngine*).
 
+**verified** (2026-10-15, current game build): `GWorld` = `"SWGR-Win64-Shipping.exe"+0xADFF928`.
+Static offset — will move on patches; still want a sigscan eventually.
+
+Verified chains:
+
+| Value | Chain | Type |
+|---|---|---|
+| RaceStartTime | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378` | double |
+| bIsRaceStarted | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388` | byte |
+| LapCount (total laps) | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370` | int |
+
+This also confirms the dump's `UWorld.GameState` (0x1B0) and the `ARacingGameState` layout
+(0x370 / 0x378 / 0x388) match the live build, so the other GameState offsets are likely good.
+
 | Hop | Offset | Field |
 |---|---|---|
 | UGameEngine → | 0x12C8 | GameInstance |
@@ -41,10 +55,8 @@ Roots (to locate by sigscan): `GWorld` (UWorld*) and/or `GEngine` (UGameEngine*)
 | AController → | 0x02F0 | Pawn |
 | AGameStateBase → | 0x02E0 | ReplicatedWorldTimeSecondsDouble (server time, for IGT math) |
 
-Draft chains (from GWorld):
-- Race started: `GWorld, 0x1B0, 0x388` (byte)
+Draft chains (from GWorld, not yet checked live):
 - Race finished (all?): `GWorld, 0x1B0, 0x389` (byte)
-- Total laps: `GWorld, 0x1B0, 0x370` (int)
 - Local player race component: `GWorld, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368` → then
   `+0xD4` CurrentLapNumber (int), `+0xCC` bHasFinishedEvent (byte), `+0xF0` EventFinishTime (float)
 - HUD VM: `GWorld, 0x1B0, 0x3D8` → `+0x16C` CurrentLapNumber, `+0x140` NumLaps
@@ -116,10 +128,10 @@ Reached via `UWorld → GameState`. Simplest single object for start/finish.
 | 0x0348 | TArray<AGfnPlayerState*> | Racers | find local player's state |
 | 0x0358 | TArray<AVehiclePawn*> | Vehicles | |
 | 0x0368 | double | CountdownEndTime | server time countdown ends |
-| 0x0370 | int32 | LapCount | total laps for this event |
-| 0x0378 | double | RaceStartTime | server time race started |
+| 0x0370 | int32 | LapCount | total laps for this event — **verified** |
+| 0x0378 | double | RaceStartTime | server time race started — **verified** |
 | 0x0380 | double | RaceTimeoutTime | |
-| 0x0388 | bool | bIsRaceStarted | start split candidate |
+| 0x0388 | bool | bIsRaceStarted | start split candidate — **verified** (address) |
 | 0x0389 | bool | bIsRaceFinished | whole race over (all racers? — check vs player finish) |
 | 0x03D8 | URaceEventVM* | RaceEventViewModel | HUD data: lap, timers, track/planet |
 | 0x03F8 | FEventRecipe | EventRecipe | `TArray<FRaceEventInstance> EventStages` |
@@ -230,6 +242,7 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [ ] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
 - [ ] Signatures for `GWorld` / `GEngine` in `SWGR-Win64-Shipping.exe` (UE5-style; verify the
       static address with UE4SS / Cheat Engine first, then write the sigscan).
-- [ ] Confirm the draft chains above resolve live (Cheat Engine pointer check).
+- [x] GWorld static address + GameState chains (RaceStartTime, bIsRaceStarted, LapCount) resolve live.
+- [ ] Remaining draft chains (player race component, HUD VM, track name) resolve live.
 - [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
 - [ ] Pause flag for an optional "pausing stops timer" setting.
