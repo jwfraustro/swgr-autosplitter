@@ -17,3 +17,6 @@ desktop.ini
 *.ptr
 *.ptrmap
 *.ct
+*.ptr.results.*
+*.scandata
+*.scandata.addresslist
