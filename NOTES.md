@@ -6,6 +6,56 @@ Offsets are from `CXXHeaderDump/Griffin.hpp` and will shift with game patches.
 
 Status legend: **dump** = read from headers only, **verified** = confirmed live.
 
+## Target: LiveSplit ASL
+
+The deliverable is a LiveSplit ASL script (`state` / `startup` / `init` / `update` / `start` /
+`split` / `reset` / `isLoading`), memory-read only — no UE4SS mod required for runners.
+Reference: `../ProjectWingman_Autosplitter/PW_Autosplitter.asl` (UE game, same structure).
+
+Takeaways from the Project Wingman script:
+- Values are declared in `state("SWGR-Win64-Shipping")` as `DeepPointer` chains from the exe
+  base: `byte foo: "SWGR-Win64-Shipping.exe", 0xBASE, 0x.., 0x..;`. The PW roots
+  (e.g. `0x9150ED0, 0x0, 0x180`) are a static global → game instance style chain.
+- Logic compares `current.x` vs `old.x` for transitions (start on 0→1, split on 2→3, etc.).
+- Strings (level IDs) are read in `init` helper funcs: deref an FString/FText to
+  (data ptr, length) and `game.ReadString(..., ReadStringType.UTF16, len)`.
+- `settings.Add` tree for modes (IL vs full game) and optional splits; `refreshRate = 30`
+  because 60 Hz gave duplicate ticks.
+- `isLoading` only matters when comparing against Game Time.
+- Static offsets break on every game patch. Better for us: signature-scan for `GWorld` /
+  `GEngine` in `init` (`SigScanTarget`), then hang all chains off that. Plan to do this.
+
+### Pointer chains (engine offsets from `CXXHeaderDump/Engine.hpp`)
+
+Roots (to locate by sigscan): `GWorld` (UWorld*) and/or `GEngine` (UGameEngine*).
+
+| Hop | Offset | Field |
+|---|---|---|
+| UGameEngine → | 0x12C8 | GameInstance |
+| UWorld → | 0x01A8 | AuthorityGameMode (ARacingGameMode in a race) |
+| UWorld → | 0x01B0 | GameState (ARacingGameState in a race) |
+| UWorld → | 0x0228 | OwningGameInstance |
+| UGameInstance → | 0x0038 | LocalPlayers (TArray: data ptr at +0x0, [0] at data+0x0) |
+| UPlayer → | 0x0030 | PlayerController |
+| AController → | 0x02B8 | PlayerState (→ AGfnPlayerState) |
+| AController → | 0x02F0 | Pawn |
+| AGameStateBase → | 0x02E0 | ReplicatedWorldTimeSecondsDouble (server time, for IGT math) |
+
+Draft chains (from GWorld):
+- Race started: `GWorld, 0x1B0, 0x388` (byte)
+- Race finished (all?): `GWorld, 0x1B0, 0x389` (byte)
+- Total laps: `GWorld, 0x1B0, 0x370` (int)
+- Local player race component: `GWorld, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368` → then
+  `+0xD4` CurrentLapNumber (int), `+0xCC` bHasFinishedEvent (byte), `+0xF0` EventFinishTime (float)
+- HUD VM: `GWorld, 0x1B0, 0x3D8` → `+0x16C` CurrentLapNumber, `+0x140` NumLaps
+- Track internal name: `GWorld, 0x1B0, 0x3D8, 0x28, 0x50` → FString (ptr, len)
+- Planet engine name: `GWorld, 0x1B0, 0x3D8, 0x30, 0xD8` → FName (needs FName pool lookup —
+  prefer the track FString or the object name)
+
+The game state is only an `ARacingGameState` during a race — in menus/paddock the same offsets
+point into a different class, so gate on something (e.g. the race state or a class check)
+before trusting values.
+
 ## IL split plan (first pass)
 
 | Event | Best candidate | Status |
@@ -76,7 +126,7 @@ Reached via `UWorld → GameState`. Simplest single object for start/finish.
 | 0x0408 | FEventRecipeState | EventRecipeState_Replication | `+0x0 int32 ActiveStage` |
 | 0x0420 | ASimpleRaceRoute* | RaceRoute | checkpoints |
 
-Delegates (hook targets for a UE4SS-side helper, if we go that route): `OnRaceStarted`,
+Delegates (research hooks only): `OnRaceStarted`,
 `OnLocalPlayerReachedFinalEventPhase` (final lap?).
 
 Times are server-time doubles; compare against `AGameStateBase` replicated server world time
@@ -146,15 +196,15 @@ KnockoutRace 5, Takedowns 6, RamjetDistance 7, PrecisionDriving 8.
 - `ARacingGameMode::RacerCrossedCheckpoint(Vehicle, checkpoint, isEndOfLap)` — function hook
   point for lap crossings.
 
-## Event hooks (UE4SS-side alternative to polling)
+## Event hooks (research only — not for the shipped autosplitter)
 
+Useful with UE4SS while *finding/verifying* values (e.g. log when these fire and compare
+against the polled fields); the ASL itself must not depend on them.
 `UGameplayActionSubsystem` (GameInstance subsystem) broadcasts gameplay actions:
 - `OnRacerLapFinished` 0x00D0 → `FRacePlayerLapGameplayAction { AGfnPlayerState* Player; int32 CompletedLapCount; }`
 - `OnRacerFinished` 0x0080 → `FRacePlayerFinishedGameplayAction { Player; URaceEventDef* EventPlayed;
   int32 FinishPosition; float FinishTime; bool bUsedCheats; }`
 
-Could hook `PlayerLapFinished` / `PlayerActionRacerFinished` from Lua and write to a shared value,
-but a pure memory-read autosplitter (LiveSplit ASL) is preferable for runners.
 
 ## Ignition / start
 
@@ -178,5 +228,8 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [ ] Does `bHasFinishedEvent` flip exactly on the finish-line frame?
 - [ ] `bIsRaceFinished` — player finish or all racers?
 - [ ] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
-- [ ] Stable pointer path from the exe base (GWorld / GEngine signature) for an ASL script.
-- [ ] Find `AGameStateBase` server world time offset (for in-game-time option).
+- [ ] Signatures for `GWorld` / `GEngine` in `SWGR-Win64-Shipping.exe` (UE5-style; verify the
+      static address with UE4SS / Cheat Engine first, then write the sigscan).
+- [ ] Confirm the draft chains above resolve live (Cheat Engine pointer check).
+- [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
+- [ ] Pause flag for an optional "pausing stops timer" setting.

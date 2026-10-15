@@ -1,5 +1,7 @@
 # SWGR Autosplitter
 
+LiveSplit ASL autosplitter (memory-read only).
+
 Autosplitter for speedrunning Star Wars: Galactic Racer (UE project **Griffin**,
 exe `SWGR-Win64-Shipping.exe`).
 
