@@ -39,6 +39,21 @@ Verified chains:
 | RaceStartTime | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378` | double |
 | bIsRaceStarted | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388` | byte |
 | LapCount (total laps) | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370` | int |
+| Player race data (UPlayerRaceEventComponent*) | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368` | ptr |
+| Player CurrentLapNumber | player race data chain + `0xD4` | int |
+| HUD lap counter (URaceEventVM.CurrentLapNumber) | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x16C` | int |
+
+Lap counter behaviour (**verified**):
+- **Player `CurrentLapNumber`** is **0** from the grid until the player first crosses the
+  start/finish line — a racer at the back of the grid stays at 0 for a few seconds after the go.
+  It then counts completed-line-crossings. Goes back to **0** when the player leaves the race.
+- **HUD lap counter** starts at **1** (what the player sees). Goes **undefined** (chain breaks)
+  when the player leaves the race.
+- In-race sanity check: HUD lap counter resolves **and** `HUD == CurrentLapNumber + 1`.
+  Use as a backup "player is truly in the race" gate.
+- Keep both: run rules aren't decided yet. Some categories (e.g. arcade time trials) may time
+  from the grid rather than from the first line crossing, so the 0→1 crossing of
+  `CurrentLapNumber` is a candidate *alternative* start trigger, not just a lap split.
 
 This also confirms the dump's `UWorld.GameState` (0x1B0) and the `ARacingGameState` layout
 (0x370 / 0x378 / 0x388) match the live build, so the other GameState offsets are likely good.
@@ -57,9 +72,9 @@ This also confirms the dump's `UWorld.GameState` (0x1B0) and the `ARacingGameSta
 
 Draft chains (from GWorld, not yet checked live):
 - Race finished (all?): `GWorld, 0x1B0, 0x389` (byte)
-- Local player race component: `GWorld, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368` → then
-  `+0xD4` CurrentLapNumber (int), `+0xCC` bHasFinishedEvent (byte), `+0xF0` EventFinishTime (float)
-- HUD VM: `GWorld, 0x1B0, 0x3D8` → `+0x16C` CurrentLapNumber, `+0x140` NumLaps
+- Player race data (chain verified above) → `+0xCC` bHasFinishedEvent (byte),
+  `+0xF0` EventFinishTime (float)
+- HUD VM (`GWorld, 0x1B0, 0x3D8`, verified) → `+0x140` NumLaps
 - Track internal name: `GWorld, 0x1B0, 0x3D8, 0x28, 0x50` → FString (ptr, len)
 - Planet engine name: `GWorld, 0x1B0, 0x3D8, 0x30, 0xD8` → FName (needs FName pool lookup —
   prefer the track FString or the object name)
@@ -72,10 +87,11 @@ before trusting values.
 
 | Event | Best candidate | Status |
 |---|---|---|
-| Race start (countdown over, go) | race state → `Racing` (5); also `ARacingGameState.bIsRaceStarted` 0→1 | dump |
-| Lap split | `UPlayerRaceEventComponent.CurrentLapNumber` increments | dump |
+| Race start (countdown over, go) | `ARacingGameState.bIsRaceStarted` 0→1; race state → `Racing` (5) | address verified, transition timing TBD |
+| Race start (alt: first line crossing) | player `CurrentLapNumber` 0→1 | verified (rules TBD) |
+| Lap split | player `CurrentLapNumber` increments (from 1 upward) | verified |
 | Race end (final-lap finish) | `UPlayerRaceEventComponent.bHasFinishedEvent` 0→1 | dump |
-| Reset / restart | race state leaves `Racing` back to pre-race states; `CurrentLapNumber` drops | dump |
+| Reset / left race | HUD lap counter goes undefined; player `CurrentLapNumber` → 0 | verified |
 
 Load removal (if needed later): race state `LoadingPhase` / `WaitForLevelToLoad`.
 
@@ -155,7 +171,7 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 | 0x00CD | bool | bHasTimedOut | fail |
 | 0x00CF | bool | bHasVehicleWrecked | fail |
 | 0x00D0 | bool | bHasBeenEliminated | fail (knockout/eliminator) |
-| 0x00D4 | int32 | CurrentLapNumber | **lap split** candidate (0- or 1-based? verify) |
+| 0x00D4 | int32 | CurrentLapNumber | **lap split** — **verified**: 0 until first line crossing, 0 after leaving race |
 | 0x00D8 | uint8 | CurrentSectorNumber | possible sub-splits |
 | 0x00E0 | double | SectorStartServerTime | |
 | 0x00E8 | double | LapStartServerTime | changes on each lap cross |
@@ -176,7 +192,7 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 | 0x0040 | FText | ModeName |
 | 0x00D8 | ERaceEventModeType (u8) | ModeType |
 | 0x0140 | int32 | NumLaps |
-| 0x016C | int32 | CurrentLapNumber |
+| 0x016C | int32 | CurrentLapNumber — **verified**: starts at 1, undefined after leaving race |
 | 0x0178 | double | CurrentLapTime |
 | 0x0188 | double | CurrentEventTime |
 | 0x01D0 | float | CountdownToRaceFinish |
@@ -236,13 +252,15 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 ## Open questions / to verify in-game
 
 - [ ] Which actor owns `UGameFlowStateMachineComponent`; confirm `CurrentStateId` tracks the enum above.
-- [ ] Is `CurrentLapNumber` 0- or 1-based, and does it tick on the final crossing too?
+- [x] `CurrentLapNumber` is 0 until the first line crossing (HUD counter starts at 1).
+- [ ] Does `CurrentLapNumber` tick on the final crossing too, or only `bHasFinishedEvent`?
 - [ ] Does `bHasFinishedEvent` flip exactly on the finish-line frame?
 - [ ] `bIsRaceFinished` — player finish or all racers?
 - [ ] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
 - [ ] Signatures for `GWorld` / `GEngine` in `SWGR-Win64-Shipping.exe` (UE5-style; verify the
       static address with UE4SS / Cheat Engine first, then write the sigscan).
 - [x] GWorld static address + GameState chains (RaceStartTime, bIsRaceStarted, LapCount) resolve live.
-- [ ] Remaining draft chains (player race component, HUD VM, track name) resolve live.
+- [x] Player race data and HUD VM chains resolve live.
+- [ ] Track internal name chain resolves live.
 - [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
 - [ ] Pause flag for an optional "pausing stops timer" setting.
