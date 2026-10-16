@@ -1,6 +1,6 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter
-// Version: 0.1.0 (first pass — IL / single race only)
+// Version: 0.2.0 (IL / single race only — Arcade vs Race start modes)
 //
 // Offsets are for the current Steam build (GWorld = exe+0xADFF928) and WILL break on game patches.
 // See NOTES.md for where each value comes from and how it was verified.
@@ -24,13 +24,13 @@ state("SWGR-Win64-Shipping")
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 startup
 {
-    // Start trigger — pick one
-    settings.Add("StartWrapper", true, "Start Trigger: Pick One");
-        settings.SetToolTip("StartWrapper", "Select only one start trigger. Run rules aren't settled yet, so both are offered.");
-    settings.Add("StartOnGo", true, "Start when the race goes", "StartWrapper");
-        settings.SetToolTip("StartOnGo", "Starts the timer when the countdown ends and racers are released (from the grid).");
-    settings.Add("StartOnLine", false, "Start on first start-line crossing", "StartWrapper");
-        settings.SetToolTip("StartOnLine", "Starts the timer when the player first crosses the start/finish line. From the back of the grid this is a few seconds after the go.");
+    // Mode — pick one. Decides the start trigger; splits and resets are shared.
+    settings.Add("ModeWrapper", true, "Mode Selector: Pick One");
+        settings.SetToolTip("ModeWrapper", "Select only one mode. Having both on will start the timer at the wrong time.");
+    settings.Add("Arcade", true, "Arcade Mode", "ModeWrapper");
+        settings.SetToolTip("Arcade", "For single-player Arcade time trials (rolling start). Starts the timer when you first cross the start line, which is when you get control.");
+    settings.Add("Race", false, "Race Mode", "ModeWrapper");
+        settings.SetToolTip("Race", "For races with a starting grid. Starts the timer when the countdown ends and racers are released.");
 
     // Splits
     settings.Add("LapSplits", true, "Split on each lap");
@@ -61,6 +61,13 @@ init
     // Stronger check from testing: in a race (before the finish), HUD lap == player lap + 1.
     // Only used at the start, where both are stable; around a line crossing they may update a tick apart.
     vars.LapsInSync = (Func<dynamic, bool>)((s) => s.hudLap == s.playerLap + 1);
+
+    // Weaker check that doesn't need the HUD. In Arcade the HUD view model appears on/just after the
+    // start-line crossing, so gating the Arcade start on InRace loses the 0 -> 1 edge some of the time.
+    vars.LapsSane = (Func<dynamic, bool>)((s) =>
+        s.totalLaps > 0 && s.totalLaps < 100
+        && s.playerLap >= 0 && s.playerLap <= s.totalLaps + 1
+    );
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 update
@@ -76,16 +83,18 @@ update
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 start
 {
-    if (!vars.InRace(current)) return false;
+    // Arcade: rolling start — the player gets control on the first start-line crossing (playerLap 0 -> 1).
+    // Deliberately not gated on the HUD view model or bIsRaceStarted (see NOTES.md, v0.1.0 field testing).
+    if (settings["Arcade"])
+        return current.playerLap == 1 && old.playerLap == 0
+            && current.finished == 0
+            && vars.LapsSane(current);
 
-    // Countdown over
-    if (settings["StartOnGo"] && current.raceStarted == 1 && old.raceStarted == 0
-        && current.playerLap == 0 && vars.LapsInSync(current))
-        return true;
-
-    // First crossing of the start/finish line
-    if (settings["StartOnLine"] && current.playerLap == 1 && old.playerLap == 0 && current.raceStarted == 1)
-        return true;
+    // Race: countdown over, racers released from the grid.
+    if (settings["Race"])
+        return vars.InRace(current)
+            && current.raceStarted == 1 && old.raceStarted == 0
+            && current.playerLap == 0 && vars.LapsInSync(current);
 
     return false;
 }
@@ -119,6 +128,10 @@ reset
 
     // Race restarted in place: race-started flag drops back to 0.
     if (old.raceStarted == 1 && current.raceStarted == 0) return true;
+
+    // Player lap drops back to 0 mid-run (verified on leaving the race; covers Arcade restarts, where
+    // bIsRaceStarted may never be set).
+    if (old.playerLap >= 1 && current.playerLap == 0 && current.finished == 0) return true;
 
     return false;
 }
