@@ -155,26 +155,19 @@ on go (`bIsRaceStarted` 0→1). See **Categories** above.
 
 **v0.1.0 field testing (Arcade):**
 - Start is occasionally flaky in Arcade (start-on-line).
-- Final time is ~0.03 s off the results screen.
+- Final time is ~0.03 s off the results screen — moved to `BUGS.md` (#1).
 - The HUD lap counter appears very close to, or just after, the moment the player gains control.
   Suspect: `InRace` requires `hudVM != 0`, so if the HUD view model is created on/after the
   `playerLap` 0→1 tick, `start` sees InRace false on that tick and the edge is lost (next tick
   `old.playerLap` is already 1). Fix idea: do not gate start-on-line on the HUD VM, or latch
   the 0→1 edge in `update` and fire once InRace becomes true.
-- ~0.03 s is about 2 ticks at 60 Hz, so polling latency on start + finish could account for it.
-  Better fix: take timing from the game rather than poll edges. Several internal race timers to
-  cross-check: `ARacingGameState.RaceStartTime` (0x378), `UPlayerRaceEventComponent`
-  `LapStartServerTime` (0xE8), `EventFinishTime` (0xF0), `PreviousLapTime` (0xFC),
-  `URaceEventVM.CurrentEventTime` (0x188) / `CurrentLapTime` (0x178),
-  `AGameStateBase.ReplicatedWorldTimeSecondsDouble` (0x2E0). Could drive LiveSplit Game Time
-  from these so the result matches the results screen exactly.
 
 **v0.2.0 changes:** settings split into **Arcade Mode** (start on `playerLap` 0→1, *not* gated on
 the HUD VM or `bIsRaceStarted`, only on sane lap values) and **Race Mode** (start on
 `bIsRaceStarted` 0→1 with the full InRace + HUD/lap sync check). Added a reset on `playerLap`
 dropping back to 0 before finishing, since Arcade may never set `bIsRaceStarted`.
 Next: rename settings to Arcade / Scenarios / Tales of Podracing (Race Mode → Tales of
-Podracing; Scenarios adds multi-race handling). Timing offset (~0.03 s) not addressed yet.
+Podracing; Scenarios adds multi-race handling). Known issues are tracked in `BUGS.md`.
 
 Load removal (if needed later): race state `LoadingPhase` / `WaitForLevelToLoad`.
 
