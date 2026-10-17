@@ -6,6 +6,61 @@ Offsets are from `CXXHeaderDump/Griffin.hpp` and will shift with game patches.
 
 Status legend: **dump** = read from headers only, **verified** = confirmed live.
 
+> Development scratchpad for now. Eventually this becomes the user-facing doc on how the
+> autosplitter behaves in each category / event type — keep the **Categories** section written
+> so it can be lifted out for that.
+
+## Categories (per Speedrun.com, 2026-10-17)
+
+Three run categories. The script's mode setting (currently "Arcade Mode" / "Race Mode") becomes
+**Arcade** / **Scenarios** / **Tales of Podracing**. Podracing is technically an Arcade event in
+the game, but it is timed and scored separately, so it gets its own setting.
+
+| Category | What it is | Start | End | Status |
+|---|---|---|---|---|
+| **Arcade — Time Trial** | Solo, N laps, rolling start | first start-line crossing (`playerLap` 0→1) | final-lap finish | covered (v0.2.0 "Arcade Mode") |
+| **Arcade — Precision Driving** | Time Trial + gates on track; each gate driven through takes **1.5 s off** the time | as Time Trial | final-lap finish; time must account for gate bonuses | not handled |
+| **Tales of Podracing** | You vs NPCs, grid start. Podracer vehicles don't change the rules | countdown ends (`bIsRaceStarted` 0→1) | final-lap finish | early handling (v0.2.0 "Race Mode") |
+| **Scenarios** | Fixed character with unique abilities; 5 regular races on 5 planets in sequence | first race's go (per-race logic as a regular race) | 5th race finish | not handled |
+
+Category details:
+- **Precision Driving:** a plain LiveSplit real-time timer will be wrong by 1.5 s × gates hit.
+  Options: read the game's time (`EventFinishTime` 0xF0, `BonusTime` 0xF4 on
+  `UPlayerRaceEventComponent`) and drive Game Time from it, or track gate bonuses as they
+  accrue. Need to check whether `EventFinishTime` already includes the bonus and how
+  `BonusTime` behaves (cumulative? sign?). Also the ~0.03 s polling offset matters more here.
+- **Scenarios:** whether loads / part selection / menus between the 5 races count is **not yet
+  decided** by the mods. Each race is handled like a regular race; the extra work is recognising
+  the transitions (race N finished → next race loaded) and not resetting on them. Relevant
+  pieces: `EContinueRunState` (campaign run flow), `EventRecipe` / `ActiveStage`, race-state
+  `LoadingPhase` / `WaitForLevelToLoad` for load removal if it's ruled in.
+- **Tales of Podracing:** grid start with countdown, so start on go rather than line crossing.
+
+### Detecting the event type: `EArcadeEventCategories`
+
+Game enum on every arcade event (`UArcadeEventDef +0x0321 Category`, u8; also on
+`UArcadeEntryVM +0x015C`, the front-end tile). Values: Default 0, FieldTest 1, **Plane 2**,
+Quick 3, **Precision 4**, Acid 5, FireIce 6, Advanced 7, Deluxe 8.
+
+| Value | Maps to |
+|---|---|
+| `Plane` (2) | Tales of Podracing (internal name for podracers) |
+| `Precision` (4) | Arcade — Precision Driving |
+| `FieldTest` 1, `Quick` 3, `Acid` 5 | Arcade — Time Trial (themed, e.g. Acid = acid-heavy maps) |
+| `FireIce` 6, `Advanced` 7, `Deluxe` 8, `Default` 0 | presumably Time Trial — **unconfirmed** |
+
+Reaching it (**dump**, not checked live): `UArcadeEventDef` is a `URaceEventDef` subclass, so
+from the running event: `GameState +0x3F8 EventRecipe.EventStages` (TArray data ptr) →
+`[ActiveStage]` `FRaceEventInstance +0x58 AuthoredEvent` → `+0x321 Category`. For stage 0:
+`"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x58, 0x321` (byte). Only valid if
+`AuthoredEvent` is actually a `UArcadeEventDef` — Scenario races won't be, so check the class
+(or treat "chain doesn't resolve / not arcade" as Scenario).
+Cross-check: `URaceEventVM +0xD8 ModeType` (`ERaceEventModeType`), where `PrecisionDriving` = 8
+and `TimeTrial` = 2.
+
+Could auto-select behaviour from this instead of relying only on the user's setting — at least
+use it to warn / pick Precision handling inside the Arcade setting.
+
 ## Target: LiveSplit ASL
 
 The deliverable is a LiveSplit ASL script (`state` / `startup` / `init` / `update` / `start` /
@@ -93,11 +148,33 @@ before trusting values.
 | Race end (final-lap finish) | `bHasFinishedEvent` 0→1 (flips near-frame-perfect); `CurrentLapNumber` also ticks to LapCount+1 on the same crossing | verified |
 | Reset / left race | HUD lap counter goes undefined; player `CurrentLapNumber` → 0 | verified |
 
-**Category note (verified in play):** Arcade races are a *rolling start* — the player only gets
-control of the speeder once they cross the start line. That makes "start on first line crossing"
-(`CurrentLapNumber` 0→1) the natural trigger for Arcade, while grid-start events fit "start on go"
-(`bIsRaceStarted` 0→1). Expect the start mode to be chosen per category (or per event type)
-rather than as a global setting — likely how the script settings / code end up being organised.
+**Start trigger by category (verified in play):** Arcade Time Trials / Precision are a *rolling
+start* — the player only gets control once they cross the start line, so start on first line
+crossing (`CurrentLapNumber` 0→1). Grid-start events (Tales of Podracing, Scenario races) start
+on go (`bIsRaceStarted` 0→1). See **Categories** above.
+
+**v0.1.0 field testing (Arcade):**
+- Start is occasionally flaky in Arcade (start-on-line).
+- Final time is ~0.03 s off the results screen.
+- The HUD lap counter appears very close to, or just after, the moment the player gains control.
+  Suspect: `InRace` requires `hudVM != 0`, so if the HUD view model is created on/after the
+  `playerLap` 0→1 tick, `start` sees InRace false on that tick and the edge is lost (next tick
+  `old.playerLap` is already 1). Fix idea: do not gate start-on-line on the HUD VM, or latch
+  the 0→1 edge in `update` and fire once InRace becomes true.
+- ~0.03 s is about 2 ticks at 60 Hz, so polling latency on start + finish could account for it.
+  Better fix: take timing from the game rather than poll edges. Several internal race timers to
+  cross-check: `ARacingGameState.RaceStartTime` (0x378), `UPlayerRaceEventComponent`
+  `LapStartServerTime` (0xE8), `EventFinishTime` (0xF0), `PreviousLapTime` (0xFC),
+  `URaceEventVM.CurrentEventTime` (0x188) / `CurrentLapTime` (0x178),
+  `AGameStateBase.ReplicatedWorldTimeSecondsDouble` (0x2E0). Could drive LiveSplit Game Time
+  from these so the result matches the results screen exactly.
+
+**v0.2.0 changes:** settings split into **Arcade Mode** (start on `playerLap` 0→1, *not* gated on
+the HUD VM or `bIsRaceStarted`, only on sane lap values) and **Race Mode** (start on
+`bIsRaceStarted` 0→1 with the full InRace + HUD/lap sync check). Added a reset on `playerLap`
+dropping back to 0 before finishing, since Arcade may never set `bIsRaceStarted`.
+Next: rename settings to Arcade / Scenarios / Tales of Podracing (Race Mode → Tales of
+Podracing; Scenarios adds multi-race handling). Timing offset (~0.03 s) not addressed yet.
 
 Load removal (if needed later): race state `LoadingPhase` / `WaitForLevelToLoad`.
 
@@ -270,3 +347,8 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [ ] Track internal name chain (`GWorld, 0x1B0, 0x3D8, 0x28, 0x50`) not resolving yet — recheck (FString: ptr at +0x0, int32 len at +0x8).
 - [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
 - [ ] Pause flag for an optional "pausing stops timer" setting.
+- [ ] `EArcadeEventCategories` chain (`…0x1B0, 0x3F8, 0x0, 0x58, 0x321`) resolves and reads Plane / Precision correctly.
+- [ ] Which category values `FireIce` / `Advanced` / `Deluxe` events use (assumed Time Trial).
+- [ ] Precision Driving: does `EventFinishTime` include gate bonuses? How does `BonusTime` count?
+- [ ] Scenarios: state sequence between the 5 races (results → load → next race); what resets falsely.
+- [ ] Mods' ruling on whether Scenario loads / part selection / menus are timed.
