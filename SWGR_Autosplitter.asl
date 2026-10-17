@@ -17,9 +17,10 @@ state("SWGR-Win64-Shipping")
     int    hudLap      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x16C; // CurrentLapNumber as shown on HUD: starts at 1
 
     // UPlayerRaceEventComponent (GWorld -> OwningGameInstance -> LocalPlayers[0] -> PlayerController -> PlayerState -> RaceEventComponent)
-    int    playerLap   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // 0 until first line crossing; LapCount+1 after the finish
+    int    playerLap   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // 0 until first line crossing; LapCount+1 after the finish, CurrentLapNumber
     byte   finished    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing
     float  finishTime  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime (game's own result) — debug only for now
+    float lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime (server time) — debug only for now
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 startup
