@@ -1,6 +1,6 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter
-// Version: 0.3.0 (IL / single race only — Arcade vs Race start modes; Game Time = game's own finish time)
+// Version: 0.4.0 (IL / single race only — Arcade vs Race start modes; Game Time from the game's own lap/finish stamps)
 //
 // Offsets are for the current Steam build (GWorld = exe+0xADFF928) and WILL break on game patches.
 // See NOTES.md for where each value comes from and how it was verified.
@@ -10,7 +10,7 @@ state("SWGR-Win64-Shipping")
     // ARacingGameState (GWorld -> GameState)
     byte   raceStarted : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388;   // bIsRaceStarted: 0 -> 1 when the race goes (countdown over)
     int    totalLaps   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370;   // LapCount: laps in this event
-    double raceStartTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378; // RaceStartTime (server time) — debug only for now
+    double raceStartTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378; // RaceStartTime (server time): base for lap-split Game Time
 
     // URaceEventVM (HUD view model, GameState +0x3D8). Pointer is 0 / chain breaks once the player leaves the race.
     long   hudVM       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8;
@@ -20,7 +20,7 @@ state("SWGR-Win64-Shipping")
     int    playerLap   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // 0 until first line crossing; LapCount+1 after the finish, CurrentLapNumber
     byte   finished    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing
     float  finishTime  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime: -1 until the finish, then the results-screen time (drives Game Time)
-    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: server time of the last line crossing — debug only for now
+    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: server time of the last line crossing (lap-split Game Time)
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 startup
@@ -97,7 +97,24 @@ gameTime
     // of the game's LapStartServerTime stamps at the start and finish crossings, so it matches the results
     // screen and carries none of the up-to-one-poll latency on our start and finish edges (see BUGS.md #1).
     if (current.finished != 0 && old.finished == 0 && current.finishTime >= 0)
+    {
+        if (settings["Debug"]) print("[SWGR] finish: finishTime " + current.finishTime + "  stamp - raceStartTime " + (current.lapStartServerTime - current.raceStartTime));
         return TimeSpan.FromSeconds(current.finishTime);
+    }
+
+    // Lap crossings (lap n -> n+1, before the finish): the game stamps LapStartServerTime at the crossing,
+    // so stamp - RaceStartTime is the exact elapsed race time (RaceStartTime = first-crossing stamp in Arcade,
+    // countdown end in Race). Setting it re-syncs the live Game Time and makes the lap split exact. Only on a
+    // tick where the stamp actually moved, and only if it's within 0.5 s of the running Game Time (garbage guard).
+    if (current.playerLap == old.playerLap + 1 && old.playerLap >= 1 && current.finished == 0
+        && current.lapStartServerTime != old.lapStartServerTime)
+    {
+        double lapElapsed = current.lapStartServerTime - current.raceStartTime;
+        double running = timer.CurrentTime.GameTime.HasValue ? timer.CurrentTime.GameTime.Value.TotalSeconds : -1;
+        if (settings["Debug"]) print("[SWGR] lap edge: stamp - raceStartTime " + lapElapsed + "  running Game Time " + running + "  correction " + (lapElapsed - running));
+        if (lapElapsed > 0 && Math.Abs(lapElapsed - running) < 0.5)
+            return TimeSpan.FromSeconds(lapElapsed);
+    }
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 start

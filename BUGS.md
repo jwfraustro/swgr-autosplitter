@@ -31,13 +31,22 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
   (and lap splits) still has the polling jitter — frame-by-frame vs the in-game timer it reads
   high or low by up to a few tens of ms. Only the finish value is exact. A live game-driven clock
   would need a non-stale game time source (see `ReplicatedWorldTimeSecondsDouble` above).
-- **Possible follow-up:** exact lap splits, by setting Game Time on each lap edge to
-  `LapStartServerTime` (new stamp) − the start stamp.
+- **Lap splits (v0.4.0):** on each lap edge `gameTime{}` sets Game Time to
+  `LapStartServerTime` (new stamp) − `RaceStartTime`, which also re-syncs the live display each
+  lap. Skipped (falls back to real time) if the stamp didn't move that tick or the value is more
+  than 0.5 s from the running Game Time. Debug output prints the correction per lap and, at the
+  finish, `stamp − RaceStartTime` next to `EventFinishTime` to confirm the base.
+  - **Verified in Race Mode (2026-10-17, 2 laps):** `RaceStartTime` is the countdown end
+    (7113.0631); the first line crossing came 2.35 s later and is not the base. Lap edge:
+    stamp − `RaceStartTime` = 15.3607 vs running Game Time 15.3539 → +6.7 ms correction applied.
+    Finish: stamp − `RaceStartTime` = 26.31217 = `EventFinishTime` (26.31217), so the game's
+    finish time is also measured from the countdown end.
+  - **Verified in Arcade (2026-10-17):** lap splits and final time correct.
 - **Rules question for the mods:** a crash before the line plays a slow-mo cinematic and the run
   still counts. In one run `EventFinishTime` was 14.33 but Real Time was 17.285, so Game Time and
   Real Time can differ by seconds.
 - **Precision Driving** will need this anyway (`BonusTime` 0xF4, gate bonuses).
-- **Status:** fixed in v0.3.0 for the final time (Arcade and Race verified). Live display / lap-split jitter remains.
+- **Status:** final time fixed in v0.3.0 (Arcade and Race verified). Lap splits exact in v0.4.0 (Arcade and Race verified); live display still jitters between lap crossings.
 
 ## 2. Exiting a race: reset → false start → reset
 
