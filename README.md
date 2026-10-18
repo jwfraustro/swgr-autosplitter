@@ -10,7 +10,7 @@ Struct offsets and enums come from the UE4SS dumps in `../game/code_dumps/`;
 
 ## Status
 
-`SWGR_Autosplitter.asl` — v0.1.0, first pass for single races (IL). Offsets are hard-coded for the
+`SWGR_Autosplitter.asl` — v0.3.0, single races (IL). Offsets are hard-coded for the
 current build (`GWorld` = exe+0xADFF928) and will break when the game patches.
 
 ## Installation (manual)
@@ -25,5 +25,7 @@ In LiveSplit: Edit Layout → `+` → Control → Scriptable Auto Splitter, then
 - **Split** on each completed lap except the last, then on the finish (`LapCount` splits total).
 - **Reset** when the race is restarted or the player quits out (not after a finished run).
 - **Debug** option prints value changes to the debug log (view with DbgView).
+- **Game Time** is set to the game's own finish time (`EventFinishTime`) at the finish, so it
+  matches the results screen; Real Time is off by up to one poll tick. No load removal yet.
 
-No load removal or in-game-time yet. See `NOTES.md` for the memory values and their status.
+See `NOTES.md` for the memory values and their status.

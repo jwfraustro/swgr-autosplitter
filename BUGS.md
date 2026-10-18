@@ -3,22 +3,36 @@
 Open issues with the autosplitter. Dev-facing; background on the values involved is in
 `NOTES.md`.
 
-## 1. Final time ~0.03 s off the results screen
+## 1. Final time ~0.01–0.03 s off the results screen
 
-- **Seen:** v0.1.0, Arcade. LiveSplit's final time differs from the in-game results screen by
-  ~0.03 s.
-- **Likely cause:** ~0.03 s is about 2 ticks at 60 Hz, so polling latency on the start edge and
-  the finish edge could account for it.
-- **Fix idea:** take timing from the game instead of polled edges and drive LiveSplit Game Time
-  from it, so the result matches the results screen exactly. Internal timers to cross-check:
-  - `ARacingGameState.RaceStartTime` (0x378)
-  - `UPlayerRaceEventComponent`: `LapStartServerTime` (0xE8), `EventFinishTime` (0xF0),
-    `PreviousLapTime` (0xFC)
-  - `URaceEventVM`: `CurrentEventTime` (0x188), `CurrentLapTime` (0x178)
-  - `AGameStateBase.ReplicatedWorldTimeSecondsDouble` (0x2E0)
-- **Why it matters more later:** Precision Driving subtracts 1.5 s per gate, so it will likely
-  need game-driven time anyway (`EventFinishTime` / `BonusTime`).
-- **Status:** open.
+- **Seen:** v0.1.0–v0.2.0, Arcade. LiveSplit's Real Time differs from the in-game results screen
+  by a few hundredths, sign varies run to run (+0.015, +0.008, −0.013 s on 1-lap time trials).
+- **Cause (confirmed 2026-10-17, `SWGR_FinishDebug.asl`):** polling jitter, not a late trigger.
+  - `bHasFinishedEvent` 0→1 and `EventFinishTime` −1→final land on the **same tick**; switching
+    the split trigger changes nothing.
+  - `EventFinishTime` = difference of the game's `LapStartServerTime` stamps at the start and
+    finish crossings (3837.7807 − 3823.4697 = 14.3110 = results screen). In Arcade,
+    `RaceStartTime` equals the first-crossing stamp.
+  - Our start and finish edges are each seen up to one poll (~17 ms at 60 Hz) after the game's
+    crossing, so Real Time is off by up to about ±1 tick.
+  - `ReplicatedWorldTimeSecondsDouble` (GameState 0x2E0) lags the crossing stamps (read
+    3837.7454 vs 3837.7807 on the finish tick) — not usable as a live game clock.
+    `URaceEventVM.CurrentEventTime` at 0x188 read garbage (wrong offset or type).
+- **Fix (v0.3.0):** Game Time runs with real time, then `gameTime{}` sets it to `EventFinishTime`
+  on the finish tick and `isLoading{}` freezes it, so the finish split's Game Time is the
+  results-screen time. Real Time is unchanged (still has the jitter). Compare against
+  **Game Time** in LiveSplit.
+- **Verified (2026-10-17):** multi-lap Arcade run: lap splits fire correctly and the final Game
+  Time matches the results screen to the millisecond, including a run with a mid-race crash
+  (slow-mo crash sequence: Real Time ran ~2 s ahead, Game Time still ended on the race result).
+- **Still to check:** Race Mode (is `EventFinishTime` measured from the
+  countdown end?); lap splits are still real-time-based (would need per-lap game time from the
+  `LapStartServerTime` stamps).
+- **Rules question for the mods:** a crash before the line plays a slow-mo cinematic and the run
+  still counts. In one run `EventFinishTime` was 14.33 but Real Time was 17.285, so Game Time and
+  Real Time can differ by seconds.
+- **Precision Driving** will need this anyway (`BonusTime` 0xF4, gate bonuses).
+- **Status:** fixed in v0.3.0 (Arcade verified; Race Mode untested).
 
 ## 2. Exiting a race: reset → false start → reset
 

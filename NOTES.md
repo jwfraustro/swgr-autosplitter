@@ -250,8 +250,8 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 | 0x00D4 | int32 | CurrentLapNumber | **lap split** — **verified**: 0 until first line crossing, 0 after leaving race |
 | 0x00D8 | uint8 | CurrentSectorNumber | possible sub-splits |
 | 0x00E0 | double | SectorStartServerTime | |
-| 0x00E8 | double | LapStartServerTime | changes on each lap cross |
-| 0x00F0 | float | EventFinishTime | game's own finish time — compare vs LiveSplit |
+| 0x00E8 | double | LapStartServerTime | stamped on each line crossing; finish stamp − start stamp = EventFinishTime |
+| 0x00F0 | float | EventFinishTime | −1 until the finish; = results-screen time; drives Game Time (v0.3.0) |
 | 0x00F4 | float | BonusTime | |
 | 0x00F8 | float | BestLapTime | |
 | 0x00FC | float | PreviousLapTime | |

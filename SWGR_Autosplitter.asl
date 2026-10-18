@@ -1,6 +1,6 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter
-// Version: 0.2.0 (IL / single race only — Arcade vs Race start modes)
+// Version: 0.3.0 (IL / single race only — Arcade vs Race start modes; Game Time = game's own finish time)
 //
 // Offsets are for the current Steam build (GWorld = exe+0xADFF928) and WILL break on game patches.
 // See NOTES.md for where each value comes from and how it was verified.
@@ -19,8 +19,8 @@ state("SWGR-Win64-Shipping")
     // UPlayerRaceEventComponent (GWorld -> OwningGameInstance -> LocalPlayers[0] -> PlayerController -> PlayerState -> RaceEventComponent)
     int    playerLap   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // 0 until first line crossing; LapCount+1 after the finish, CurrentLapNumber
     byte   finished    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing
-    float  finishTime  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime (game's own result) — debug only for now
-    float lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime (server time) — debug only for now
+    float  finishTime  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime: -1 until the finish, then the results-screen time (drives Game Time)
+    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: server time of the last line crossing — debug only for now
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 startup
@@ -77,9 +77,27 @@ update
     {
         if (current.raceStarted != old.raceStarted) print("[SWGR] raceStarted " + old.raceStarted + " -> " + current.raceStarted + "  (startTime " + current.raceStartTime + ")");
         if (current.playerLap   != old.playerLap)   print("[SWGR] playerLap "   + old.playerLap   + " -> " + current.playerLap + "  hudLap " + current.hudLap + "  totalLaps " + current.totalLaps);
+        if (current.playerLap   != old.playerLap)   print("[SWGR]   lapStartServerTime " + old.lapStartServerTime + " -> " + current.lapStartServerTime + "  (lap time " + (current.lapStartServerTime - old.lapStartServerTime) + ")");
         if (current.finished    != old.finished)    print("[SWGR] finished "    + old.finished    + " -> " + current.finished  + "  finishTime " + current.finishTime);
         if ((current.hudVM != 0) != (old.hudVM != 0)) print("[SWGR] hudVM " + (current.hudVM != 0 ? "defined" : "undefined"));
     }
+}
+//-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+isLoading
+{
+    // Freeze Game Time once the race is finished, so the value set in gameTime{} stays exact
+    // (otherwise real time keeps ticking on between gameTime{} and split{}).
+    return current.finished != 0;
+}
+//-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+gameTime
+{
+    // Game Time runs with real time during the race, then snaps to EventFinishTime on the finish tick
+    // (gameTime{} runs before split{}, so the finish split records it). EventFinishTime is the difference
+    // of the game's LapStartServerTime stamps at the start and finish crossings, so it matches the results
+    // screen and carries none of the up-to-one-poll latency on our start and finish edges (see BUGS.md #1).
+    if (current.finished != 0 && old.finished == 0 && current.finishTime >= 0)
+        return TimeSpan.FromSeconds(current.finishTime);
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 start
