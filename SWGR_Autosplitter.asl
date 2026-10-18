@@ -1,6 +1,6 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter
-// Version: 0.4.0 (IL / single race only — Arcade vs Race start modes; Game Time from the game's own lap/finish stamps)
+// Version: 0.4.1 (IL / single race only — Arcade vs Race start modes; Game Time from the game's own lap/finish stamps)
 //
 // Offsets are for the current Steam build (GWorld = exe+0xADFF928) and WILL break on game patches.
 // See NOTES.md for where each value comes from and how it was verified.
@@ -69,10 +69,22 @@ init
         s.totalLaps > 0 && s.totalLaps < 100
         && s.playerLap >= 0 && s.playerLap <= s.totalLaps + 1
     );
+
+    // Timestamps of the race that was just torn down (restart / exit). During the transition the pointer
+    // chains flicker between 0 and the dead race's memory, which replays its values (playerLap 0 -> 1,
+    // raceStarted 0 -> 1) with the SAME timestamps. A real start always brings a new timestamp. See BUGS.md #2.
+    vars.DeadLapStamp = 0.0;
+    vars.DeadRaceStart = 0.0;
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 update
 {
+    // Remember the torn-down race's timestamps (only from real, non-zero readings).
+    if (old.playerLap >= 1 && current.playerLap == 0 && old.lapStartServerTime != 0)
+        vars.DeadLapStamp = old.lapStartServerTime;
+    if (old.raceStarted == 1 && current.raceStarted == 0 && old.raceStartTime != 0)
+        vars.DeadRaceStart = old.raceStartTime;
+
     if (settings["Debug"])
     {
         if (current.raceStarted != old.raceStarted) print("[SWGR] raceStarted " + old.raceStarted + " -> " + current.raceStarted + "  (startTime " + current.raceStartTime + ")");
@@ -122,15 +134,29 @@ start
     // Arcade: rolling start — the player gets control on the first start-line crossing (playerLap 0 -> 1).
     // Deliberately not gated on the HUD view model or bIsRaceStarted (see NOTES.md, v0.1.0 field testing).
     if (settings["Arcade"])
-        return current.playerLap == 1 && old.playerLap == 0
-            && current.finished == 0
-            && vars.LapsSane(current);
+    {
+        if (!(current.playerLap == 1 && old.playerLap == 0 && current.finished == 0 && vars.LapsSane(current))) return false;
+        if (current.lapStartServerTime == vars.DeadLapStamp)
+        {
+            if (settings["Debug"]) print("[SWGR] start rejected: lapStartServerTime " + current.lapStartServerTime + " is the torn-down race's");
+            return false;
+        }
+        return true;
+    }
 
     // Race: countdown over, racers released from the grid.
     if (settings["Race"])
-        return vars.InRace(current)
+    {
+        if (!(vars.InRace(current)
             && current.raceStarted == 1 && old.raceStarted == 0
-            && current.playerLap == 0 && vars.LapsInSync(current);
+            && current.playerLap == 0 && vars.LapsInSync(current))) return false;
+        if (current.raceStartTime == vars.DeadRaceStart)
+        {
+            if (settings["Debug"]) print("[SWGR] start rejected: raceStartTime " + current.raceStartTime + " is the torn-down race's");
+            return false;
+        }
+        return true;
+    }
 
     return false;
 }

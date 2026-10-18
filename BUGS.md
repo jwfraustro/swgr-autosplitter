@@ -59,14 +59,17 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
 - **Why it matters:** Scenarios chain 5 races with loading screens / transitions between them.
   A spurious start or reset there would wreck a run, and if loads end up being timed we can't
   just ignore the transition.
-- **Suspected cause (unconfirmed):** the Arcade start is deliberately *not* gated on the HUD VM
-  (that was the v0.2.0 fix for the flaky start — see `NOTES.md`), only on `LapsSane` + `playerLap` 0→1 +
-  `finished == 0`. During world teardown / load, the `GWorld → GameState → …` chains likely read
-  stale or reused memory (or the old/new world's GameState), and `playerLap` going 0→1 with a
-  plausible `totalLaps` is enough to fire. Second reset is then `hudVM`/`playerLap` dropping again.
-- **To investigate:** run with the **Debug** setting on and capture the DbgView log across an
-  exit; record which values flip and in what order. Then consider gating on something that is
-  definitely "in a live race" without needing the HUD VM — e.g. the race state machine
-  (`Racing` / `RollingStart`), the GameState class, or `RaceStartTime` / world identity being
-  unchanged since the previous tick.
-- **Status:** open.
+- **Cause (confirmed 2026-10-17, Debug log of a restart):** during teardown the pointer chains
+  flicker between 0 and the **dead race's memory**, which replays its values: `raceStarted` 0→1,
+  `playerLap` 0→1 with `totalLaps` 4, `hudVM` defined — enough to pass the Arcade start
+  (`LapsSane` + `playerLap` 0→1 + `finished == 0`). The Race start wouldn't have fired because `playerLap`
+  was already 1, but nothing stopped it in principle. Tell-tale: the replayed
+  `LapStartServerTime` / `RaceStartTime` are **identical** to the torn-down race's
+  (7614.48608680475 every time), while a real start always brings a new timestamp.
+- **Fix (v0.4.1):** `update{}` remembers the torn-down race's `LapStartServerTime` (on
+  `playerLap` ≥1→0) and `RaceStartTime` (on `raceStarted` 1→0). The Arcade start is rejected if
+  `LapStartServerTime` equals the dead one; the Race start if `RaceStartTime` does. Debug output
+  prints `start rejected: …` when it happens. Verified 2026-10-17: no false starts on
+  restart / exit. Relevant for Scenarios later: transitions between races go through the
+  same teardown.
+- **Status:** fixed in v0.4.1.

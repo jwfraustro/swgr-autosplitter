@@ -10,7 +10,7 @@ Struct offsets and enums come from the UE4SS dumps in `../game/code_dumps/`;
 
 ## Status
 
-`SWGR_Autosplitter.asl` — v0.4.0, single races (IL). Offsets are hard-coded for the
+`SWGR_Autosplitter.asl` — v0.4.1, single races (IL). Offsets are hard-coded for the
 current build (`GWorld` = exe+0xADFF928) and will break when the game patches.
 
 ## Installation (manual)
