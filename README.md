@@ -1,12 +1,6 @@
-# SWGR Autosplitter
+# Star Wars: Galactic Racer Autosplitter
 
-LiveSplit ASL autosplitter (memory-read only).
-
-Autosplitter for speedrunning Star Wars: Galactic Racer (UE project **Griffin**,
-exe `SWGR-Win64-Shipping.exe`).
-
-Struct offsets and enums come from the UE4SS dumps in `../game/code_dumps/`;
-`../tools/vehicle_state_logger.py` is a working example of reading game state from memory.
+LiveSplit autosplitter for speedrunning Star Wars: Galactic Racer.
 
 ## Status
 
@@ -18,7 +12,7 @@ current build (`GWorld` = exe+0xADFF928) and will break when the game patches.
 In LiveSplit: Edit Layout → `+` → Control → Scriptable Auto Splitter, then point it at
 `SWGR_Autosplitter.asl`. Settings appear in the component's settings page.
 
-## What it does
+## Installation (automatic)
 
 - **Start** (pick one): when the countdown ends and the race goes, *or* when the player first
   crosses the start/finish line.
