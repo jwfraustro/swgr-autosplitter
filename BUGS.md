@@ -25,14 +25,19 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
 - **Verified (2026-10-17):** multi-lap Arcade run: lap splits fire correctly and the final Game
   Time matches the results screen to the millisecond, including a run with a mid-race crash
   (slow-mo crash sequence: Real Time ran ~2 s ahead, Game Time still ended on the race result).
-- **Still to check:** Race Mode (is `EventFinishTime` measured from the
-  countdown end?); lap splits are still real-time-based (would need per-lap game time from the
-  `LapStartServerTime` stamps).
+- **Verified (2026-10-17), Race Mode:** start fires at the countdown end, splits fire correctly,
+  final Game Time matches the in-game timer.
+- **Known, accepted:** before the finish, Game Time just follows real time, so the live display
+  (and lap splits) still has the polling jitter — frame-by-frame vs the in-game timer it reads
+  high or low by up to a few tens of ms. Only the finish value is exact. A live game-driven clock
+  would need a non-stale game time source (see `ReplicatedWorldTimeSecondsDouble` above).
+- **Possible follow-up:** exact lap splits, by setting Game Time on each lap edge to
+  `LapStartServerTime` (new stamp) − the start stamp.
 - **Rules question for the mods:** a crash before the line plays a slow-mo cinematic and the run
   still counts. In one run `EventFinishTime` was 14.33 but Real Time was 17.285, so Game Time and
   Real Time can differ by seconds.
 - **Precision Driving** will need this anyway (`BonusTime` 0xF4, gate bonuses).
-- **Status:** fixed in v0.3.0 (Arcade verified; Race Mode untested).
+- **Status:** fixed in v0.3.0 for the final time (Arcade and Race verified). Live display / lap-split jitter remains.
 
 ## 2. Exiting a race: reset → false start → reset
 
