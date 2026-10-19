@@ -14,6 +14,9 @@ In LiveSplit: Edit Layout → `+` → Control → Scriptable Auto Splitter, then
 
 ## Installation (automatic)
 
+Once this autosplitter is incorporated into Livesplit, it will be available from the "Edit Splits" menu.
+
+# Options
 - **Start** (pick one): when the countdown ends and the race goes, *or* when the player first
   crosses the start/finish line.
 - **Split** on each completed lap except the last, then on the finish (`LapCount` splits total).
