@@ -29,6 +29,15 @@ Category details:
   `UPlayerRaceEventComponent`) and drive Game Time from it, or track gate bonuses as they
   accrue. Need to check whether `EventFinishTime` already includes the bonus and how
   `BonusTime` behaves (cumulative? sign?). Also the ~0.03 s polling offset matters more here.
+  **Verified (2026-10-19), from the HUD VM (`URaceEventVM`, `GWorld, 0x1B0, 0x3D8`):**
+  `+0x188 CurrentEventTime` (double) is the running event time **with the 1.5 s gate deductions
+  already applied**, so it's the Precision IGT to drive Game Time from. `+0x178 CurrentLapTime`
+  (double) is the **raw** lap time without deductions, and it resets each lap.
+  On `UPlayerRaceEventComponent` (**verified**): `+0xF0 EventFinishTime` equals the final
+  `CurrentEventTime` at the finish, so it's the **adjusted** time and the existing final-time
+  logic works unchanged for Precision. `+0xF4 BonusTime` (float) is the **running total** of gate
+  deductions, positive, 1.5 per gate (1 gate = 1.5, 2 = 3.0, …). Gates hit = `BonusTime` / 1.5,
+  and raw IGT = adjusted time + `BonusTime`.
 - **Scenarios:** ranked by **RTA**, so loads, part selection and menus between the 5 races all
   count (mods, 2026-10-19; see **Multi-event categories** below). Each race is handled like a regular race; the extra work is recognising
   the transitions (race N finished → next race loaded) and not resetting on them. Relevant
@@ -76,9 +85,9 @@ Leads from the dump are marked as *lead* and are unchecked.
 
 | # | What | Used by | Leads |
 |---|---|---|---|
-| M1 | "Start New Campaign" selected (main menu) | Sebulba%, Any% | `EFrontEndFlowState`; the campaign save going from empty to created |
-| M2 | Reset-campaign "Are you sure?" → **Accept** | NG+ Sebulba% / Any% / Champion% | *lead*: `UGfnGameInstance +0x268 CampaignResetInfo` (`UGfnCampaignResetData`); confirm-dialog result; campaign progress resetting to Act 1 |
-| M3 | Act III loadout check → **Continue** (after Star Run) | NG+ Act III | `EContinueRunState` (Paddock 0 … StartEvent 4) on the paddock / run flow; loadout-check widget |
+| M1 | "Start New Campaign" selected (main menu) | Sebulba%, Any% | **verified**: `UCampaignSubsystem +0xC1 bIsPlayingPrologue` 0→1 (see below) |
+| M2 | Reset-campaign "Are you sure?" → **Accept** | NG+ Sebulba% / Any% / Champion% | **verified**: same flag as M1, `bIsPlayingPrologue` 0→1 on confirm. (`UGfnGameInstance +0x268 CampaignResetInfo` was a dud.) |
+| M3 | Act III loadout check → **Continue** (after Start Run) | NG+ Act III | **verified**: `UCampaignSubsystem +0xC8 ActiveRun` null → `UCampaignRun*` on Continue; gate on `UCampaignMetaProgression +0x28 MainCampaignCurrentTourIx` = Act III (Tour = Act; index value TBC, presumably 2) |
 | M4 | Arcade "Start Event" pressed | Arcade% | front-end arcade VM (`UArcadeEntryVM`); event def = Landspeeder Ace |
 | M5 | Scenario start | Scenarios | after the mods rule; probably the same mechanism as M4 |
 | M6 | Current campaign **act + race** identity (to recognise the Sebulba and Kestar finals) | all campaign | `EventRecipe` → `AuthoredEvent` (`URaceEventDef` object name / `InternalName`), track internal name; campaign progress object |
@@ -87,6 +96,26 @@ Leads from the dump are marked as *lead* and are unchecked.
 | M9 | Scenario **race index / last race** | Scenarios | `EventRecipeState.ActiveStage` vs `EventStages` count, if scenarios use one recipe |
 | M10 | Campaign **difficulty** (optional; Champion% validity warning) | NG+ Champion% | *lead*: `APaddockGameState +0x318 PreRunChosenDifficulty`, `UCampaignMetaProgression +0x110 LastPickedDifficulty` (`UCampaignDifficultyDef*`; Rookie / Racer / Ace / Champion) |
 | M11 | Load / menu state between races (only if load removal is ever wanted) | all multi-event | race state `LoadingPhase` / `WaitForLevelToLoad`; `EContinueRunState` |
+
+#### `UCampaignSubsystem` (GameInstance subsystem): campaign start triggers
+
+The start triggers for M1–M3 found in-game (2026-10-19) all live here.
+
+| Offset | Type | Field | Use |
+|---|---|---|---|
+| 0x00C1 | bool | bIsPlayingPrologue | **verified**: flips 0→1 as soon as a campaign is reset (after Accept) **and** when starting a new campaign. One trigger covers M1 and M2 |
+| 0x00C8 | UCampaignRun* | ActiveRun | **verified**: null → `UCampaignRun` immediately on the Act III loadout Continue (M3) |
+| 0x00E0 | UCampaignMetaProgression* | MetaProgression | → `+0x28 int32 MainCampaignCurrentTourIx` (current Act; check it for NG+ Act III) |
+
+- Start for Sebulba% / Any% / NG+ (all three): `bIsPlayingPrologue` 0→1. The script's category
+  setting decides which run it is, since the flag can't tell a new campaign from a reset.
+- Start for NG+ Act III: `ActiveRun` 0 → non-zero **and** `MainCampaignCurrentTourIx` = Act III.
+  Need to confirm `ActiveRun` doesn't also flip at other points (e.g. starting Acts I/II, resuming
+  a run after loading a save). The Tour check should screen out the Act I/II cases.
+- TODO: a pointer chain to the subsystem. `UGfnGameInstance::GetCampaignManager()` returns it.
+  The fixed path is GameInstance → subsystem collection map, or use whatever path you found it by
+  in UE4SS / CE. Write the chain here once settled.
+- TODO: confirm the `MainCampaignCurrentTourIx` value for Act III (0- or 1-based).
 
 ### Detecting the event type: `EArcadeEventCategories`
 
@@ -99,7 +128,7 @@ Quick 3, **Precision 4**, Acid 5, FireIce 6, Advanced 7, Deluxe 8.
 | `Plane` (2) | Tales of Podracing (internal name for podracers) |
 | `Precision` (4) | Arcade — Precision Driving |
 | `FieldTest` 1, `Quick` 3, `Acid` 5 | Arcade — Time Trial (themed, e.g. Acid = acid-heavy maps) |
-| `FireIce` 6, `Advanced` 7, `Deluxe` 8, `Default` 0 | presumably Time Trial — **unconfirmed** |
+| `FireIce` 6, `Advanced` 7, `Deluxe` 8, `Default` 0 | Arcade - Time Trial |
 
 Reaching it (**dump**, not checked live): `UArcadeEventDef` is a `URaceEventDef` subclass, so
 from the running event: `GameState +0x3F8 EventRecipe.EventStages` (TArray data ptr) →
@@ -304,7 +333,7 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 | 0x00E0 | double | SectorStartServerTime | |
 | 0x00E8 | double | LapStartServerTime | stamped on each line crossing; finish stamp − start stamp = EventFinishTime |
 | 0x00F0 | float | EventFinishTime | −1 until the finish; = results-screen time; drives Game Time (v0.3.0) |
-| 0x00F4 | float | BonusTime | |
+| 0x00F4 | float | BonusTime | **verified**: running total of Precision gate deductions, +1.5 per gate |
 | 0x00F8 | float | BestLapTime | |
 | 0x00FC | float | PreviousLapTime | |
 | 0x0120 | ERaceFailReason (u8) | FailReasons | bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16 |
@@ -321,8 +350,8 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 | 0x00D8 | ERaceEventModeType (u8) | ModeType |
 | 0x0140 | int32 | NumLaps |
 | 0x016C | int32 | CurrentLapNumber — **verified**: starts at 1, undefined after leaving race |
-| 0x0178 | double | CurrentLapTime |
-| 0x0188 | double | CurrentEventTime |
+| 0x0178 | double | CurrentLapTime — **verified**: raw IGT for the current lap, resets each lap, no Precision deductions |
+| 0x0188 | double | CurrentEventTime — **verified**: total event time **minus** Precision gate deductions (1.5 s each) |
 | 0x01D0 | float | CountdownToRaceFinish |
 | 0x01D4 | bool | bIsSuccess |
 
@@ -394,8 +423,12 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [ ] Pause flag for an optional "pausing stops timer" setting.
 - [ ] `EArcadeEventCategories` chain (`…0x1B0, 0x3F8, 0x0, 0x58, 0x321`) resolves and reads Plane / Precision correctly.
 - [x] Which category values `FireIce` / `Advanced` / `Deluxe` events use (assumed Time Trial).
-- [ ] Precision Driving: does `EventFinishTime` include gate bonuses? How does `BonusTime` count?
+- [x] Precision Driving IGT: HUD VM `CurrentEventTime` (0x188) already has the gate deductions;
+      `CurrentLapTime` (0x178) is raw.
+- [x] Precision: `EventFinishTime` = final `CurrentEventTime` (adjusted); `BonusTime` = total
+      deduction, 1.5 per gate.
 - [ ] Scenarios: state sequence between the 5 races (results → load → next race); what resets falsely.
 - [x] Mods' ruling on whether Scenario loads / part selection / menus are timed: Scenarios are RTA,
       so everything counts (2026-10-19). Start point still TBD.
-- [ ] Multi-event memory hunt: M1–M11 in **Memory to find** above.
+- [ ] Multi-event memory hunt: M1–M11 in **Memory to find** above. M1–M3 found
+      (`UCampaignSubsystem`); still need a stable chain to the subsystem and the Act III Tour index.
