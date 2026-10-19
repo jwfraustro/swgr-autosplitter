@@ -348,6 +348,7 @@ Precision event under Time Trial — it never changes what the script does).
 
 Each step keeps the script shippable; ILs must not regress.
 
+0. Skeleton: function stubs, variables, placeholders where they do not exist.
 1. Introduce the snapshot layer and move the existing lambdas (`InRace`, `LapsSane`,
    `LapsInSync`) and dead-stamp capture onto it. Behaviour identical to v0.4.1.
 2. Extract the edges (`RaceGoEdge`, `FirstCrossingEdge`, `LapEdge`, `FinishEdge`) and the
