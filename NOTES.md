@@ -29,12 +29,64 @@ Category details:
   `UPlayerRaceEventComponent`) and drive Game Time from it, or track gate bonuses as they
   accrue. Need to check whether `EventFinishTime` already includes the bonus and how
   `BonusTime` behaves (cumulative? sign?). Also the ~0.03 s polling offset matters more here.
-- **Scenarios:** whether loads / part selection / menus between the 5 races count is **not yet
-  decided** by the mods. Each race is handled like a regular race; the extra work is recognising
+- **Scenarios:** ranked by **RTA**, so loads, part selection and menus between the 5 races all
+  count (mods, 2026-10-19; see **Multi-event categories** below). Each race is handled like a regular race; the extra work is recognising
   the transitions (race N finished → next race loaded) and not resetting on them. Relevant
   pieces: `EContinueRunState` (campaign run flow), `EventRecipe` / `ActiveStage`, race-state
   `LoadingPhase` / `WaitForLevelToLoad` for load removal if it's ruled in.
 - **Tales of Podracing:** grid start with countdown, so start on go rather than line crossing.
+
+## Multi-event categories (mods' rules, 2026-10-19)
+
+Official timing for everything below is **RTA**, and every category requires video. We also
+track **IGT**, the sum of each race's `EventFinishTime`, for players who want it. Retries and
+menus are left out of IGT. Single events (Time Trial, Arcade, Precision) stay IGT-ranked, with
+RTA tracked alongside.
+
+| Category | Timing | Start | End |
+|---|---|---|---|
+| **Arcade Scenarios** | RTA, with IGT included in the submission | **TBD**: the mods time from video and the timer is optional. Likely the scenario's start confirm (ask them) | finish of the scenario's last race |
+| **Arcade%** (all 50 events in order; 3 Deluxe excluded; retries allowed) | RTA | **"Start Event"** pressed on *Landspeeder Ace* (a menu press, not the line crossing) | finish of *The Experiment* **with Bronze beaten** |
+| **Sebulba%** (fresh save, any difficulty) | RTA | **"Start New Campaign"** selected | final-lap finish vs **Sebulba** (last race of Act 1) |
+| **Any%** (fresh save, any difficulty) | RTA | **"Start New Campaign"** selected | final-lap finish vs **Kestar's Podracer** (last race of Act 3) |
+| **NG+ Sebulba%** | RTA | **"Accept"** on the campaign-reset *"Are you sure?"* dialog | final-lap finish vs Sebulba |
+| **NG+ Any%** | RTA | reset-campaign **"Accept"** | final-lap finish vs Kestar's Podracer |
+| **NG+ Champion%** (Champion difficulty) | RTA | reset-campaign **"Accept"** | final-lap finish vs Kestar's Podracer |
+| **NG+ Act III** | RTA | **"Continue"** on the Act III loadout check (after *Star Run* → Racer Style and Favors) | final-lap finish vs Kestar's Podracer |
+
+That gives **5 start triggers**: New Campaign, reset Accept, Act III loadout Continue, Arcade
+"Start Event", and Scenario start. There are **4 end triggers**, all on the existing final-lap
+finish (`bHasFinishedEvent` 0→1) plus an identity check: Sebulba race, Kestar race, The
+Experiment with Bronze, and the scenario's last race.
+
+Splits: one per race (campaign or scenario) and one per event (Arcade%). A failed Arcade% attempt
+that gets retried must **not** split or end the run. The same goes for failing out and switching
+vehicle in NG+ Sebulba%.
+
+Open with the mods:
+- [ ] Exact Scenario start point.
+- [ ] Is "Real Time" plain RTA, or load-removed? (Assumed plain.)
+- [ ] NG+ Champion%: is a fresh-save start also allowed? The rules title says NG+ but the text
+      doesn't.
+
+### Memory to find (multi-event categories)
+
+Starts are all menu actions, so they need front-end / UI state rather than race state.
+Leads from the dump are marked as *lead* and are unchecked.
+
+| # | What | Used by | Leads |
+|---|---|---|---|
+| M1 | "Start New Campaign" selected (main menu) | Sebulba%, Any% | `EFrontEndFlowState`; the campaign save going from empty to created |
+| M2 | Reset-campaign "Are you sure?" → **Accept** | NG+ Sebulba% / Any% / Champion% | *lead*: `UGfnGameInstance +0x268 CampaignResetInfo` (`UGfnCampaignResetData`); confirm-dialog result; campaign progress resetting to Act 1 |
+| M3 | Act III loadout check → **Continue** (after Star Run) | NG+ Act III | `EContinueRunState` (Paddock 0 … StartEvent 4) on the paddock / run flow; loadout-check widget |
+| M4 | Arcade "Start Event" pressed | Arcade% | front-end arcade VM (`UArcadeEntryVM`); event def = Landspeeder Ace |
+| M5 | Scenario start | Scenarios | after the mods rule; probably the same mechanism as M4 |
+| M6 | Current campaign **act + race** identity (to recognise the Sebulba and Kestar finals) | all campaign | `EventRecipe` → `AuthoredEvent` (`URaceEventDef` object name / `InternalName`), track internal name; campaign progress object |
+| M7 | Current arcade **event identity** (Landspeeder Ace, The Experiment) | Arcade% | `EventRecipe … AuthoredEvent` → `UArcadeEventDef` object name |
+| M8 | Arcade **medal result** for the finished event (Bronze beaten?) | Arcade% | results / goal state (`WBP_Arcade_Goal` shows beaten vs unbeaten; want the underlying data, not the widget); or compare `EventFinishTime` against the event def's Bronze time |
+| M9 | Scenario **race index / last race** | Scenarios | `EventRecipeState.ActiveStage` vs `EventStages` count, if scenarios use one recipe |
+| M10 | Campaign **difficulty** (optional; Champion% validity warning) | NG+ Champion% | *lead*: `APaddockGameState +0x318 PreRunChosenDifficulty`, `UCampaignMetaProgression +0x110 LastPickedDifficulty` (`UCampaignDifficultyDef*`; Rookie / Racer / Ace / Champion) |
+| M11 | Load / menu state between races (only if load removal is ever wanted) | all multi-event | race state `LoadingPhase` / `WaitForLevelToLoad`; `EContinueRunState` |
 
 ### Detecting the event type: `EArcadeEventCategories`
 
@@ -332,7 +384,7 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [x] `CurrentLapNumber` ticks on the final crossing too: ends at LapCount+1.
 - [x] `bHasFinishedEvent` flips near-perfectly on the finish crossing (revisit if timing drift shows up).
 - [ ] `bIsRaceFinished` — player finish or all racers?
-- [ ] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
+- [x] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
 - [ ] Signatures for `GWorld` / `GEngine` in `SWGR-Win64-Shipping.exe` (UE5-style; verify the
       static address with UE4SS / Cheat Engine first, then write the sigscan).
 - [x] GWorld static address + GameState chains (RaceStartTime, bIsRaceStarted, LapCount) resolve live.
@@ -341,7 +393,9 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
 - [ ] Pause flag for an optional "pausing stops timer" setting.
 - [ ] `EArcadeEventCategories` chain (`…0x1B0, 0x3F8, 0x0, 0x58, 0x321`) resolves and reads Plane / Precision correctly.
-- [ ] Which category values `FireIce` / `Advanced` / `Deluxe` events use (assumed Time Trial).
+- [x] Which category values `FireIce` / `Advanced` / `Deluxe` events use (assumed Time Trial).
 - [ ] Precision Driving: does `EventFinishTime` include gate bonuses? How does `BonusTime` count?
 - [ ] Scenarios: state sequence between the 5 races (results → load → next race); what resets falsely.
-- [ ] Mods' ruling on whether Scenario loads / part selection / menus are timed.
+- [x] Mods' ruling on whether Scenario loads / part selection / menus are timed: Scenarios are RTA,
+      so everything counts (2026-10-19). Start point still TBD.
+- [ ] Multi-event memory hunt: M1–M11 in **Memory to find** above.
