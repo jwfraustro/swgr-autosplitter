@@ -62,12 +62,12 @@ offsets point into a menu GameState and read garbage.
 | Reading | Field | Type | Status | Notes |
 |---|---|---|---|---|
 | `raceStarted` | bIsRaceStarted | byte | have | grid-start "go" |
-| `raceFinished` | bIsRaceFinished | byte | lead | player or all racers? |
-| `totalLaps` | LapCount | int | have | sanity gate + lap split bound |
+| `raceFinished` | bIsRaceFinished | byte | verified | player-based (local player's finish) |
+| `totalLaps` | LapCount | int | have | sanity gate + lap split bound. **100 in Elimination** campaign events (run until top 3 remain) |
 | `raceStartTime` | RaceStartTime | double | have | base for lap-split IGT; dead-race guard |
-| `countdownEndTime` | CountdownEndTime | double | lead | cross-check for grid starts |
-| `activeStage` | EventRecipeState.ActiveStage | int | lead | stage index in a multi-stage recipe (Scenarios?) |
-| `stageCount` | EventRecipe.EventStages.Num | int | lead | TArray count at `0x3F8 + 0x8` |
+| `countdownEndTime` | CountdownEndTime | double | verified | server-time stamp on the `raceStartTime` clock (e.g. 1670.018), not a seconds-left counter; cross-check for grid starts |
+| `activeStage` | EventRecipeState.ActiveStage | int | verified | 0-indexed stage in the recipe (Scenarios?) |
+| `stageCount` | EventRecipe.EventStages.Num | int | verified | TArray count at `0x3F8 + 0x8` |
 | `raceFlowState` | state machine CurrentStateId | int | find | `UGameFlowStateMachineComponent` owner unknown; would give `Racing` / `Results` / `Leaving` directly |
 
 **B. `URaceEventVM`** (HUD view model, `GWorld, 0x1B0, 0x3D8`) — pointer is 0 outside a race.
@@ -76,12 +76,12 @@ offsets point into a menu GameState and read garbage.
 |---|---|---|---|---|
 | `hudVM` | (the pointer) | long | have | presence = HUD exists |
 | `hudLap` | CurrentLapNumber | int | have | starts at 1 |
-| `hudNumLaps` | NumLaps | int | lead | second opinion on `totalLaps` |
+| `hudNumLaps` | NumLaps | int | verified | matches `totalLaps`; 100 in Elimination (hidden on the HUD) |
 | `hudLapTime` | CurrentLapTime | double | verified | raw lap IGT, resets per lap |
 | `hudEventTime` | CurrentEventTime | double | verified | running event IGT, gate deductions applied in Precision Driving arcade races |
-| `hudModeType` | ModeType | byte | lead | `ERaceEventModeType`; Precision = 8 |
-| `trackNamePtr` / `trackNameLen` | track → InternalName (FString) | ptr/int | lead | chain not resolving yet |
-| `hudSuccess` | bIsSuccess | byte | lead | finish outcome |
+| `hudModeType` | ModeType | byte | verified | `ERaceEventModeType`; TimeTrial 2 seen live, Precision = 8 |
+| `trackNamePtr` / `trackNameLen` | track → InternalName (FString) | ptr/int | partial | resolves for Time Trial / Podracing, bad pointer in Precision; campaign gives only the map (`DAL_SHORT_06`). Use `stageName` instead |
+| `hudSuccess` | bIsSuccess | byte | verified | finish outcome |
 
 **C. `UPlayerRaceEventComponent`** (local player, chain `…0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368`).
 
@@ -92,19 +92,23 @@ offsets point into a menu GameState and read garbage.
 | `finishTime` | EventFinishTime | float | have | −1 until finish; results-screen time (adjusted for Precision) |
 | `bonusTime` | BonusTime | float | verified | Precision gate deductions, 1.5 per gate |
 | `lapStartServerTime` | LapStartServerTime | double | have | stamp at each crossing; dead-race guard |
-| `eventPosition` | EventPosition | int | lead | finish position (campaign "must win"?) |
-| `failReasons` | FailReasons | byte | lead | bitflags; `bHasTimedOut` / `bHasVehicleWrecked` / `bHasBeenEliminated` nearby |
-| `bestLapTime`, `prevLapTime` | | float | lead | display only |
+| `eventPosition` | EventPosition | int | verified | finish position (campaign "must win"?) |
+| `failReasons` | FailReasons | byte | verified | bitflags |
+| `wrecked` | bHasVehicleWrecked | byte | verified | 1 = wrecked out of the race for good |
+| `timedOut`, `eliminated` | bHasTimedOut, bHasBeenEliminated | byte | lead | |
+| `bestLapTime`, `prevLapTime` | | float | verified | display only |
 
-**D. Event identity** (`EventRecipe.EventStages[ActiveStage]`, `FRaceEventInstance`).
+**D. Event identity** (`EventRecipe.EventStages[ActiveStage]`, `FRaceEventInstance`). Chain is
+`GWorld, 0x1B0, 0x3F8, <field>` — the elements are inline (0x308 bytes each), so **no** `0x0` deref
+after the data pointer (the earlier `…0x3F8, 0x0, …` chains were wrong). Stage N = data ptr + N × 0x308.
 
 | Reading | Field | Type | Status | Notes |
 |---|---|---|---|---|
-| `stageNamePtr` / `stageNameLen` | FRaceEventInstance.InternalName (FString) | ptr/int | lead | stable event ID; best bet for M6 / M7 |
-| `arcadeCategory` | AuthoredEvent → `UArcadeEventDef.Category` | byte | lead | `EArcadeEventCategories`; only meaningful if the def *is* an arcade def |
+| `stageNamePtr` / `stageName` | FRaceEventInstance.InternalName (FString, UTF-16) | ptr/string | verified | stable event ID for M6 / M7 in every mode seen: arcade `EVT_ARC_PRE_BIKE_MAS_A_FWD`, `EVT_ARC_TMR_PLANE_BGL_PLANE_FWD`; campaign `DAL_SHORT_06_TeamRace_Dry`. (`stageNameLen` still lead) |
+| `arcadeCategory` | AuthoredEvent → `UArcadeEventDef.Category` | byte | verified (arcade) | `EArcadeEventCategories`; Plane 2 seen live. Undefined in campaign (not an arcade def) |
 | `authoredEvent` | FRaceEventInstance.AuthoredEvent | ptr | lead | class check (arcade vs campaign def) |
-| `skipCountdown` | URaceEventDef.bShouldSkipCountdown | byte | lead | rolling vs grid start, straight from the def |
-| `stageLapCount` | FRaceEventInstance.LapCount | byte | lead | cross-check `totalLaps` |
+| `skipCountdown` | URaceEventDef.bShouldSkipCountdown | byte | verified (arcade) | rolling vs grid start, straight from the def. Undefined in campaign |
+| `stageLapCount` | FRaceEventInstance.LapCount | byte | verified | matches `totalLaps` (100 in Elimination) |
 
 **E. Campaign** (`UCampaignSubsystem`, chain TBD — `UGfnGameInstance::GetCampaignManager()`).
 
@@ -140,7 +144,7 @@ snapshot; the lambda that computes it is listed under **Functions**.
 | Property | Type | Meaning | Status |
 |---|---|---|---|
 | `HudVmPresent` | bool | HUD view model pointer resolved | have (`hudVM != 0`) |
-| `LapsSane` | bool | `totalLaps` and `playerLap` in range | have |
+| `LapsSane` | bool | `totalLaps` in (0, 100] and `playerLap` in range (100 = Elimination) | have (v0.4.1 bound is `< 100`, BUGS.md #3) |
 | `InRace` | bool | local player is in a live race | have |
 | `LapsInSync` | bool | `hudLap == playerLap + 1` | have |
 | `RaceGo` | bool | `raceStarted` is set (grid released) | have (raw) |
@@ -244,10 +248,10 @@ BUGS.md #1 originally read garbage at that offset, `NOTES.md` now says verified 
 
 | Function | Returns | Definition | Status | Used by |
 |---|---|---|---|---|
-| `MapId(s)` | track internal name | FString at HUD VM → track → InternalName | lead (chain broken) | display, Scenario / campaign race recognition |
-| `EventId(s)` | stable event name | `FRaceEventInstance.InternalName` (or AuthoredEvent object name) | lead | Arcade% (Landspeeder Ace, The Experiment), Sebulba / Kestar finals |
+| `MapId(s)` | track internal name | FString at HUD VM → track → InternalName | partial (bad in Precision; map only in campaign) | display, Scenario / campaign race recognition |
+| `EventId(s)` | stable event name | `stageName` (`FRaceEventInstance.InternalName`) | verified chain | Arcade% (Landspeeder Ace, The Experiment), Sebulba / Kestar finals |
 | `EventKind(s)` | TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown | `arcadeCategory` if `authoredEvent` is an arcade def (Plane→Podracing, Precision→Precision, else TimeTrial); campaign if `CampaignRunActive`; Scenario if recipe has >1 stage and not campaign | lead | **optional**: Debug warning when the loaded event doesn't match the chosen category. Never selects behaviour |
-| `IsLastStage(s)` | last race of a multi-stage recipe? | `StageIndex == StageCount − 1` | lead | Scenarios end (M9) |
+| `IsLastStage(s)` | last race of a multi-stage recipe? | `StageIndex == StageCount − 1` (0-indexed) | verified readings | Scenarios end (M9) |
 | `IsEvent(s, name)` | is this the named event? | `EventId(s) == name` | lead | all end-identity checks |
 | `MedalBeaten(s, tier)` | did the finish beat the tier? | results data, or `FinishIgt ≤ def.BronzeTime` | find | Arcade% end (M8) |
 | `CampaignAct(s)` | Act index | `campaignAct` | lead | NG+ Act III start, sanity on campaign ends |
@@ -364,10 +368,13 @@ Each step keeps the script shippable; ILs must not regress.
 
 ## Open items this plan depends on
 
-- `EventId` / `MapId`: a working FString chain (track InternalName chain is broken; try
-  `FRaceEventInstance.InternalName` via `EventStages[ActiveStage]`).
-- `EventKind` (optional, Debug warning only): verify the `arcadeCategory` chain and the class
-  check for non-arcade defs.
+- `EventId`: chain works (`stageName`). Still need the actual names of Landspeeder Ace, The
+  Experiment and the Sebulba / Kestar finals, and to confirm ASL `string` reads auto-detect UTF-16.
+- `EventKind` (optional, Debug warning only): `arcadeCategory` works in arcade but is garbage in
+  campaign, so decide "campaign" first (or class-check `authoredEvent`).
+- Elimination events: `totalLaps` = 100. `LapsSane` must allow 100 (v0.4.1 uses `< 100`, see
+  BUGS.md #3), and lap splits / the end condition need checking there (the event ends on
+  elimination, not on lap 100).
 - Stable chain to `UCampaignSubsystem`; Act III index value; whether `activeRun` flips elsewhere.
 - M4 / M5 menu-press readings; M8 medal result; M9 stage count for Scenarios.
 - `raceFlowState` owner — would replace several heuristics (`IsLoading`, `IsRaceGameState`,

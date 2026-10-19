@@ -20,6 +20,7 @@
 // MARKERS used in comments
 //   HAVE      exists in v0.4.1; port it.                 VERIFIED  address/behaviour confirmed live, not used by v0.4.1 yet.
 //   LEAD      candidate offset from the dump, unverified. FIND      no candidate yet; see DEV_NOTES.md "Memory to find" (M1..M11).
+//   PARTIAL   resolves live, but only in some event types; the comment says which.
 //   TODO(stepN)  what to fill in, and at which REFACTOR.md migration step.
 //
 // ASL facts to remember (REFACTOR.md): a reading whose chain fails reads as 0/default, not an error; gameTime{} runs before
@@ -29,7 +30,7 @@
 
 //=====================================================================================================================================================================================================
 // 1. READINGS  (REFACTOR.md "Variables > Raw readings")
-// One line per value. Commented-out lines are LEAD / FIND entries: uncomment once the chain is verified in DEV_NOTES.md.
+// One line per value. Commented-out lines are LEAD / FIND / PARTIAL entries: uncomment once the chain is verified in DEV_NOTES.md.
 // Patch handling (later): add further state("SWGR-Win64-Shipping", "<build>") blocks and set `version` in init{}.
 // Cheat Engine mirror: cheat_engine_resources/SWGR_Refactor.CT, built by make_refactor_ct.py (hand-transcribed — update it when a chain here changes).
 //=====================================================================================================================================================================================================
@@ -37,12 +38,12 @@ state("SWGR-Win64-Shipping")
 {
     //--- A. ARacingGameState  (GWorld -> GameState: exe, 0xADFF928, 0x1B0). Only an ARacingGameState during a race; garbage otherwise.
     byte   raceStarted      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388;   // HAVE  bIsRaceStarted: 0 -> 1 when the grid is released (countdown over)
-    int    totalLaps        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370;   // HAVE  LapCount: laps in this event
+    int    totalLaps        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370;   // HAVE  LapCount: laps in this event. Elimination (campaign) events read 100 = "until top 3 remain"
     double raceStartTime    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378;   // HAVE  RaceStartTime (server time): base for lap-split IGT; dead-race guard
-    // byte   raceFinished     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x389;   // LEAD  bIsRaceFinished — player or all racers? (DEV_NOTES open question)
-    // double countdownEndTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x368;   // LEAD  CountdownEndTime — cross-check for grid starts
-    // int    activeStage      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x408;   // LEAD  EventRecipeState.ActiveStage — stage index in a multi-stage recipe (Scenarios? M9)
-    // int    stageCount       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x400;   // LEAD  EventRecipe.EventStages.Num (TArray count = data ptr + 0x8) (M9)
+    byte   raceFinished     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x389;   // VERIFIED  bIsRaceFinished: player-based (local player's finish), not all racers
+    double countdownEndTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x368;   // VERIFIED  CountdownEndTime: server-time stamp on the RaceStartTime clock (e.g. 1670.018), not a 3.0 s countdown
+    int    activeStage      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x408;   // VERIFIED  EventRecipeState.ActiveStage: 0-indexed stage in the recipe (M9)
+    int    stageCount       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x400;   // VERIFIED  EventRecipe.EventStages.Num (TArray count = data ptr + 0x8) (M9)
     // int    raceFlowState    : ???;                                                   // FIND  ESimpleRaceGameModeState via UGameFlowStateMachineComponent; owner unknown (DEV_NOTES "Race flow state machine")
 
     //--- B. URaceEventVM  (HUD view model: GameState + 0x3D8). Pointer is 0 / chain breaks once the player leaves the race.
@@ -50,11 +51,11 @@ state("SWGR-Win64-Shipping")
     int    hudLap           : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x16C;   // HAVE  CurrentLapNumber as shown on HUD: starts at 1
     double hudLapTime       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x178;   // VERIFIED  CurrentLapTime: raw lap IGT, resets each lap, no Precision deductions
     double hudEventTime     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x188;   // VERIFIED  CurrentEventTime: running event IGT with Precision gate deductions applied
-    // int    hudNumLaps       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x140;   // LEAD  NumLaps — second opinion on totalLaps
-    // byte   hudModeType      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x0D8;   // LEAD  ERaceEventModeType: TimeTrial 2, PrecisionDriving 8
-    // byte   hudSuccess       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x1D4;   // LEAD  bIsSuccess — finish outcome
-    // long   trackNamePtr     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x28, 0x50;        // LEAD  track -> InternalName FString data ptr   (chain NOT resolving yet)
-    // int    trackNameLen     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x28, 0x58;        // LEAD  FString length (int32 at +0x8)
+    int    hudNumLaps       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x140;   // VERIFIED  NumLaps: matches totalLaps; 100 in Elimination events (hidden on the HUD)
+    byte   hudModeType      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x0D8;   // VERIFIED  ERaceEventModeType: TimeTrial 2 seen live; PrecisionDriving 8 (dump)
+    byte   hudSuccess       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x1D4;   // VERIFIED  bIsSuccess — finish outcome
+    // long   trackNamePtr     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x28, 0x50;        // PARTIAL  track -> InternalName: OK for Time Trial / Podracing, bad ptr in Precision; campaign = map only ("DAL_SHORT_06"). Use stageName instead
+    int    trackNameLen     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x28, 0x58;        // VERIFIED  FString length (int32 at +0x8)
 
     //--- C. UPlayerRaceEventComponent  (GWorld -> OwningGameInstance -> LocalPlayers[0] -> PlayerController -> PlayerState -> RaceEventComponent)
     int    playerLap          : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // HAVE  CurrentLapNumber: 0 until first crossing; LapCount+1 after the finish; 0 after leaving
@@ -62,21 +63,24 @@ state("SWGR-Win64-Shipping")
     float  finishTime         : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // HAVE  EventFinishTime: -1 until the finish, then the results-screen time (Precision: already adjusted)
     float  bonusTime          : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF4; // VERIFIED  BonusTime: running total of Precision gate deductions, +1.5 per gate
     double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // HAVE  LapStartServerTime: stamp at each crossing; dead-race guard
-    // int    eventPosition      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xC4;  // LEAD  EventPosition — campaign "must win"?
-    // byte   failReasons        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0x120; // LEAD  ERaceFailReason bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16
+    int    eventPosition      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xC4;  // VERIFIED  EventPosition — campaign "must win"?
+    byte   failReasons        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0x120; // VERIFIED  ERaceFailReason bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16
     // byte   timedOut           : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCD;  // LEAD  bHasTimedOut
-    // byte   wrecked            : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCF;  // LEAD  bHasVehicleWrecked
-    // byte   eliminated         : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD0;  // LEAD  bHasBeenEliminated
-    // float  bestLapTime        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF8;  // LEAD  BestLapTime — display only
-    // float  prevLapTime        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xFC;  // LEAD  PreviousLapTime — display only
+    byte   wrecked            : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCF;  // VERIFIED  bHasVehicleWrecked: 1 = wrecked out of the race for good (not a respawnable crash)
+    byte   eliminated         : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD0;  // VERIFIED  bHasBeenEliminated
+    float  bestLapTime        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF8;  // VERIFIED  BestLapTime — display only
+    float  prevLapTime        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xFC;  // VERIFIED  PreviousLapTime — display only
 
-    //--- D. Event identity  (GameState + 0x3F8 EventRecipe.EventStages[ActiveStage] -> FRaceEventInstance). Index 0 shown; real index = activeStage * 0x60(?) — element size TBC.
-    // long   stageNamePtr     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x10;        // LEAD  FRaceEventInstance.InternalName FString ptr — best bet for EventId (M6 / M7)
-    // int    stageNameLen     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x18;        // LEAD  FString length
-    // long   authoredEvent    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x58;        // LEAD  URaceEventDef* — class check (UArcadeEventDef vs campaign def)
-    // byte   arcadeCategory   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x58, 0x321; // LEAD  EArcadeEventCategories: Plane 2 (Podracing), Precision 4; only valid if authoredEvent IS an arcade def
-    // byte   skipCountdown    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x58, 0xB8;  // LEAD  URaceEventDef.bShouldSkipCountdown — rolling vs grid start
-    // byte   stageLapCount    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x30;        // LEAD  FRaceEventInstance.LapCount — cross-check totalLaps
+    //--- D. Event identity  (GameState + 0x3F8 EventRecipe.EventStages -> FRaceEventInstance[ActiveStage]).
+    //    EventStages is TArray<FRaceEventInstance>: elements are INLINE (0x308 bytes each), so there is NO deref after the data ptr.
+    //    Stage 0 shown (single-race events). Stage N = data ptr + N * 0x308; state{} can't index, so read it in update{} if Scenarios need it.
+    long      stageNamePtr  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x10;          // VERIFIED  FRaceEventInstance.InternalName FString data ptr
+    string128 stageName     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x10, 0x0;     // VERIFIED  InternalName text (UTF-16). Arcade "EVT_ARC_PRE_BIKE_MAS_A_FWD"; campaign "DAL_SHORT_06_TeamRace_Dry". EventId (M6 / M7)
+    int    stageNameLen     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x18;        // VERIFIED  FString length
+    long   authoredEvent    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58;        // VERIFIED  URaceEventDef* — class check (UArcadeEventDef vs campaign def)
+    byte      arcadeCategory: "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58, 0x321;   // VERIFIED  EArcadeEventCategories: Plane 2 (Podracing) seen live, Precision 4. Undefined in campaign (def isn't an arcade def)
+    byte      skipCountdown : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58, 0xB8;    // VERIFIED  (arcade)  URaceEventDef.bShouldSkipCountdown — rolling vs grid start. Undefined in campaign
+    byte      stageLapCount : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x30;          // VERIFIED  FRaceEventInstance.LapCount — matches totalLaps (100 in Elimination)
 
     //--- E. Campaign  (UCampaignSubsystem — GameInstance subsystem. Chain TBD: UGfnGameInstance::GetCampaignManager(); see DEV_NOTES "UCampaignSubsystem")
     // byte   playingPrologue    : ???, 0xC1;   // VERIFIED (field) / FIND (chain)  bIsPlayingPrologue: 0 -> 1 on "Start New Campaign" AND on reset "Accept" (M1, M2)
@@ -272,10 +276,13 @@ init
 
     //--- 3d. Identity ("which race / event is this?")
 
-    // Stable track name: FString at HUD VM -> track -> InternalName. Read with game.ReadString(ptr, ReadStringType.UTF16, len).   LEAD (chain broken)   TODO(step6)
+    // Track / map name: FString at HUD VM -> track -> InternalName (UTF-16). Bad ptr in Precision; campaign gives only the map ("DAL_SHORT_06").
+    // Prefer deriving the map from EventId's prefix where needed.                                  PARTIAL   TODO(step6)
     vars.MapId = (Func<dynamic, string>)((s) => "");
 
-    // Stable event name: FRaceEventInstance.InternalName (or the AuthoredEvent object name).       LEAD (M6 / M7)   TODO(step6)
+    // Stable event name: stageName = EventStages[ActiveStage].InternalName. Arcade "EVT_ARC_<mode>_<vehicle>_<track>_<variant>"
+    // (e.g. EVT_ARC_PRE_BIKE_MAS_A_FWD = arcade precision, bike, Mastiff); campaign "<MAP>_<race type>_<condition>"
+    // (e.g. DAL_SHORT_06_TeamRace_Dry). Works in every mode seen so far.                          VERIFIED (M6 / M7)   TODO(step6)
     vars.EventId = (Func<dynamic, string>)((s) => "");
 
     // Is this the named event?  Definition: EventId(s) == name.                                   LEAD   TODO(step6)
@@ -283,10 +290,10 @@ init
 
     // TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown. OPTIONAL — Debug mismatch warning only, never selects behaviour.
     // Definition: arcadeCategory if authoredEvent is an arcade def (Plane 2 -> Podracing, Precision 4 -> Precision, else TimeTrial);
-    // Campaign if CampaignRunActive; Scenario if stageCount > 1 and not campaign.                 LEAD   TODO(optional)
+    // Campaign if CampaignRunActive; Scenario if stageCount > 1 and not campaign.                 VERIFIED readings (arcadeCategory garbage in campaign: check campaign FIRST)   TODO(optional)
     vars.EventKind = (Func<dynamic, string>)((s) => "Unknown");
 
-    // Last race of a multi-stage recipe?  Definition: StageIndex == StageCount - 1.               LEAD (M9)   TODO(step7)
+    // Last race of a multi-stage recipe?  Definition: StageIndex == StageCount - 1 (ActiveStage is 0-indexed).   VERIFIED readings (M9)   TODO(step7)
     vars.IsLastStage = (Func<dynamic, bool>)((s) => false);
 
     // Did the finish beat the medal tier?  Definition: medalResult, or FinishIgt <= the event def's tier time.   FIND (M8)   TODO(step7)
@@ -318,10 +325,22 @@ init
         s.bonusTime          = c.bonusTime;
         s.lapStartServerTime = c.lapStartServerTime;
         // s.raceFlowState   = c.raceFlowState;        // FIND
-        // s.activeStage     = c.activeStage;          // LEAD (M9)
-        // s.stageCount      = c.stageCount;           // LEAD (M9)
-        // s.failReasons     = c.failReasons;          // LEAD
-        // s.arcadeCategory  = c.arcadeCategory;       // LEAD
+        s.raceFinished       = c.raceFinished;          // VERIFIED  player-based
+        s.countdownEndTime   = c.countdownEndTime;      // VERIFIED
+        s.activeStage        = c.activeStage;           // VERIFIED (M9)
+        s.stageCount         = c.stageCount;            // VERIFIED (M9)
+        s.hudNumLaps         = c.hudNumLaps;            // VERIFIED
+        s.hudModeType        = c.hudModeType;           // VERIFIED
+        s.hudSuccess         = c.hudSuccess;            // VERIFIED
+        s.eventPosition      = c.eventPosition;         // VERIFIED
+        s.failReasons        = c.failReasons;           // VERIFIED
+        s.wrecked            = c.wrecked;               // VERIFIED
+        s.bestLapTime        = c.bestLapTime;           // VERIFIED
+        s.prevLapTime        = c.prevLapTime;           // VERIFIED
+        s.stageName          = c.stageName;             // VERIFIED  stage 0 only (see state{} D)
+        s.arcadeCategory     = c.arcadeCategory;        // VERIFIED  arcade only; garbage in campaign
+        s.skipCountdown      = c.skipCountdown;         // VERIFIED  arcade only; garbage in campaign
+        s.stageLapCount      = c.stageLapCount;         // VERIFIED
         // s.authoredEvent   = c.authoredEvent;        // LEAD
         // s.playingPrologue = c.playingPrologue;      // VERIFIED field / FIND chain (M1, M2)
         // s.activeRun       = c.activeRun;            // VERIFIED field / FIND chain (M3)
@@ -330,21 +349,21 @@ init
 
         //--- derived: presence / sanity                                                         status      step
         s.HudVmPresent = c.hudVM != 0;                                                        // HAVE        step1
-        s.LapsSane     = false;  // TODO(step1): totalLaps in (0, 100) && 0 <= playerLap <= totalLaps + 1   (v0.4.1 vars.LapsSane)
+        s.LapsSane     = false;  // TODO(step1): totalLaps in (0, 100] && 0 <= playerLap <= totalLaps + 1   (v0.4.1 vars.LapsSane)
         s.LapsInSync   = false;  // TODO(step1): hudLap == playerLap + 1                                   (v0.4.1 vars.LapsInSync)
         s.InRace       = false;  // TODO(step1): vars.InRace(s)      — set AFTER LapsSane / HudVmPresent
         s.RaceGo       = c.raceStarted != 0;                                                  // HAVE        step1
         s.Finished     = c.finished != 0;                                                     // HAVE        step1
-        s.Failed       = false;  // TODO(step5): timedOut || wrecked || eliminated || failReasons != 0     LEAD
+        s.Failed       = false;  // TODO(step5): timedOut || wrecked || eliminated || failReasons != 0     wrecked/failReasons VERIFIED; timedOut/eliminated LEAD
         s.Paused       = false;  // TODO(step8): vars.IsPaused(s)                                          LEAD
         s.Loading      = false;  // TODO(step5): vars.IsLoading(s)                                         LEAD / FIND
 
         //--- derived: identity
         s.EventKind    = "Unknown"; // TODO(optional): vars.EventKind(s)   — Debug warning only
-        s.EventId      = "";        // TODO(step6): vars.EventId(s)        LEAD (M6 / M7)
-        s.MapId        = "";        // TODO(step6): vars.MapId(s)          LEAD
-        s.StageIndex   = -1;        // TODO(step7): activeStage            LEAD (M9)
-        s.StageCount   = -1;        // TODO(step7): stageCount             LEAD (M9)
+        s.EventId      = "";        // TODO(step6): vars.EventId(s)        VERIFIED chain (M6 / M7)
+        s.MapId        = "";        // TODO(step6): vars.MapId(s)          PARTIAL
+        s.StageIndex   = -1;        // TODO(step7): activeStage            VERIFIED (M9)
+        s.StageCount   = -1;        // TODO(step7): stageCount             VERIFIED (M9)
         s.IsLastStage  = false;     // TODO(step7): vars.IsLastStage(s)
 
         //--- derived: timing

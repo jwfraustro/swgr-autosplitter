@@ -90,10 +90,10 @@ Leads from the dump are marked as *lead* and are unchecked.
 | M3 | Act III loadout check → **Continue** (after Start Run) | NG+ Act III | **verified**: `UCampaignSubsystem +0xC8 ActiveRun` null → `UCampaignRun*` on Continue; gate on `UCampaignMetaProgression +0x28 MainCampaignCurrentTourIx` = Act III (Tour = Act; index value TBC, presumably 2) |
 | M4 | Arcade "Start Event" pressed | Arcade% | front-end arcade VM (`UArcadeEntryVM`); event def = Landspeeder Ace |
 | M5 | Scenario start | Scenarios | after the mods rule; probably the same mechanism as M4 |
-| M6 | Current campaign **act + race** identity (to recognise the Sebulba and Kestar finals) | all campaign | `EventRecipe` → `AuthoredEvent` (`URaceEventDef` object name / `InternalName`), track internal name; campaign progress object |
-| M7 | Current arcade **event identity** (Landspeeder Ace, The Experiment) | Arcade% | `EventRecipe … AuthoredEvent` → `UArcadeEventDef` object name |
+| M6 | Current campaign **act + race** identity (to recognise the Sebulba and Kestar finals) | all campaign | **verified chain**: `FRaceEventInstance.InternalName` (`stageName`, see **Track / planet / event identity**), e.g. `DAL_SHORT_06_TeamRace_Dry`. Still need the finals' names; act from the campaign progress object |
+| M7 | Current arcade **event identity** (Landspeeder Ace, The Experiment) | Arcade% | **verified chain**: same `stageName`, e.g. `EVT_ARC_PRE_BIKE_MAS_A_FWD`. Still need those two events' names |
 | M8 | Arcade **medal result** for the finished event (Bronze beaten?) | Arcade% | results / goal state (`WBP_Arcade_Goal` shows beaten vs unbeaten; want the underlying data, not the widget); or compare `EventFinishTime` against the event def's Bronze time |
-| M9 | Scenario **race index / last race** | Scenarios | `EventRecipeState.ActiveStage` vs `EventStages` count, if scenarios use one recipe |
+| M9 | Scenario **race index / last race** | Scenarios | **verified readings**: `EventRecipeState.ActiveStage` (0-indexed) vs `EventStages` count. Still to check that a Scenario is one recipe |
 | M10 | Campaign **difficulty** (optional; Champion% validity warning) | NG+ Champion% | *lead*: `APaddockGameState +0x318 PreRunChosenDifficulty`, `UCampaignMetaProgression +0x110 LastPickedDifficulty` (`UCampaignDifficultyDef*`; Rookie / Racer / Ace / Champion) |
 | M11 | Load / menu state between races (only if load removal is ever wanted) | all multi-event | race state `LoadingPhase` / `WaitForLevelToLoad`; `EContinueRunState` |
 
@@ -130,12 +130,14 @@ Quick 3, **Precision 4**, Acid 5, FireIce 6, Advanced 7, Deluxe 8.
 | `FieldTest` 1, `Quick` 3, `Acid` 5 | Arcade — Time Trial (themed, e.g. Acid = acid-heavy maps) |
 | `FireIce` 6, `Advanced` 7, `Deluxe` 8, `Default` 0 | Arcade - Time Trial |
 
-Reaching it (**dump**, not checked live): `UArcadeEventDef` is a `URaceEventDef` subclass, so
-from the running event: `GameState +0x3F8 EventRecipe.EventStages` (TArray data ptr) →
-`[ActiveStage]` `FRaceEventInstance +0x58 AuthoredEvent` → `+0x321 Category`. For stage 0:
-`"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x0, 0x58, 0x321` (byte). Only valid if
-`AuthoredEvent` is actually a `UArcadeEventDef` — Scenario races won't be, so check the class
-(or treat "chain doesn't resolve / not arcade" as Scenario).
+Reaching it (**verified** 2026-10-19, read Plane 2 on a podracing event): `UArcadeEventDef` is a
+`URaceEventDef` subclass, so from the running event: `GameState +0x3F8 EventRecipe.EventStages`
+(TArray data ptr) → `[ActiveStage]` `FRaceEventInstance +0x58 AuthoredEvent` → `+0x321 Category`.
+For stage 0: `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58, 0x321` (byte). The
+elements are inline, so there is no deref between the data pointer and the field (the earlier
+`…0x3F8, 0x0, 0x58…` chain was wrong). Only valid if `AuthoredEvent` is actually a
+`UArcadeEventDef`: in campaign it reads undefined, and Scenario races probably won't be arcade
+defs either, so decide campaign / Scenario first (or check the class).
 Cross-check: `URaceEventVM +0xD8 ModeType` (`ERaceEventModeType`), where `PrecisionDriving` = 8
 and `TimeTrial` = 2.
 
@@ -300,15 +302,15 @@ Reached via `UWorld → GameState`. Simplest single object for start/finish.
 |---|---|---|---|
 | 0x0348 | TArray<AGfnPlayerState*> | Racers | find local player's state |
 | 0x0358 | TArray<AVehiclePawn*> | Vehicles | |
-| 0x0368 | double | CountdownEndTime | server time countdown ends |
-| 0x0370 | int32 | LapCount | total laps for this event — **verified** |
+| 0x0368 | double | CountdownEndTime | server time countdown ends — **verified**: a stamp on the `RaceStartTime` clock (e.g. 1670.018), not seconds left |
+| 0x0370 | int32 | LapCount | total laps for this event — **verified**. **100** in Elimination campaign events (they run until the top 3 remain) |
 | 0x0378 | double | RaceStartTime | server time race started — **verified** |
 | 0x0380 | double | RaceTimeoutTime | |
 | 0x0388 | bool | bIsRaceStarted | start split candidate — **verified** (address) |
-| 0x0389 | bool | bIsRaceFinished | whole race over (all racers? — check vs player finish) |
+| 0x0389 | bool | bIsRaceFinished | **verified**: player-based (local player's finish), not all racers |
 | 0x03D8 | URaceEventVM* | RaceEventViewModel | HUD data: lap, timers, track/planet |
-| 0x03F8 | FEventRecipe | EventRecipe | `TArray<FRaceEventInstance> EventStages` |
-| 0x0408 | FEventRecipeState | EventRecipeState_Replication | `+0x0 int32 ActiveStage` |
+| 0x03F8 | FEventRecipe | EventRecipe | `TArray<FRaceEventInstance> EventStages`: data ptr at 0x3F8, Num at 0x400 — **verified**. Elements inline, 0x308 bytes |
+| 0x0408 | FEventRecipeState | EventRecipeState_Replication | `+0x0 int32 ActiveStage` — **verified**, 0-indexed |
 | 0x0420 | ASimpleRaceRoute* | RaceRoute | checkpoints |
 
 Delegates (research hooks only): `OnRaceStarted`,
@@ -323,10 +325,10 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 
 | Offset | Type | Field | Use |
 |---|---|---|---|
-| 0x00C4 | int32 | EventPosition | race position |
+| 0x00C4 | int32 | EventPosition | race position — **verified** |
 | 0x00CC | bool | bHasFinishedEvent | **final split** candidate |
 | 0x00CD | bool | bHasTimedOut | fail |
-| 0x00CF | bool | bHasVehicleWrecked | fail |
+| 0x00CF | bool | bHasVehicleWrecked | fail — **verified**: 1 = wrecked out of the race for good |
 | 0x00D0 | bool | bHasBeenEliminated | fail (knockout/eliminator) |
 | 0x00D4 | int32 | CurrentLapNumber | **lap split** — **verified**: 0 until first line crossing, 0 after leaving race |
 | 0x00D8 | uint8 | CurrentSectorNumber | possible sub-splits |
@@ -334,9 +336,9 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 | 0x00E8 | double | LapStartServerTime | stamped on each line crossing; finish stamp − start stamp = EventFinishTime |
 | 0x00F0 | float | EventFinishTime | −1 until the finish; = results-screen time; drives Game Time (v0.3.0) |
 | 0x00F4 | float | BonusTime | **verified**: running total of Precision gate deductions, +1.5 per gate |
-| 0x00F8 | float | BestLapTime | |
-| 0x00FC | float | PreviousLapTime | |
-| 0x0120 | ERaceFailReason (u8) | FailReasons | bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16 |
+| 0x00F8 | float | BestLapTime | **verified** |
+| 0x00FC | float | PreviousLapTime | **verified** |
+| 0x0120 | ERaceFailReason (u8) | FailReasons | bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16 — **verified** (address) |
 
 ## HUD view model — URaceEventVM
 
@@ -344,16 +346,16 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
 
 | Offset | Type | Field |
 |---|---|---|
-| 0x0028 | UTrackDef* | track |
+| 0x0028 | UTrackDef* | track — **partial**: `→ +0x50 InternalName` resolves in Time Trial / Podracing, bad pointer in Precision; in campaign it is just the map (`DAL_SHORT_06`) |
 | 0x0030 | UPlanetDef* | Planet |
 | 0x0040 | FText | ModeName |
-| 0x00D8 | ERaceEventModeType (u8) | ModeType |
-| 0x0140 | int32 | NumLaps |
+| 0x00D8 | ERaceEventModeType (u8) | ModeType — **verified** (TimeTrial 2 seen) |
+| 0x0140 | int32 | NumLaps — **verified**; 100 in Elimination (hidden on the HUD) |
 | 0x016C | int32 | CurrentLapNumber — **verified**: starts at 1, undefined after leaving race |
 | 0x0178 | double | CurrentLapTime — **verified**: raw IGT for the current lap, resets each lap, no Precision deductions |
 | 0x0188 | double | CurrentEventTime — **verified**: total event time **minus** Precision gate deductions (1.5 s each) |
 | 0x01D0 | float | CountdownToRaceFinish |
-| 0x01D4 | bool | bIsSuccess |
+| 0x01D4 | bool | bIsSuccess — **verified** |
 
 ## Track / planet / event identity
 
@@ -361,9 +363,17 @@ Times are server-time doubles; compare against `AGameStateBase` replicated serve
   this over localized text), `+0xB8 TSoftObjectPtr<UPlanetDef> Planet`, `+0xE8 bool bIsPointToPoint`,
   `+0xE9 bool bIsReverse`, `+0xEC int32 DefaultLapCount`.
 - `UPlanetDef`: `+0x30 FText PlayerFacingName`, `+0xD8 FName EngineFacingName` (stable ID).
-- `FRaceEventInstance` (elements of `EventRecipe.EventStages`, index `ActiveStage`):
-  `+0x00 FText PlayerFacingName`, `+0x10 FString InternalName`, `+0x20 UTrackDef*`,
+- `FRaceEventInstance` (elements of `EventRecipe.EventStages`, index `ActiveStage`; size 0x308,
+  stored inline): `+0x00 FText PlayerFacingName`, `+0x10 FString InternalName`, `+0x20 UTrackDef*`,
   `+0x30 uint8 LapCount`, `+0x4A ERaceEventModeType`, `+0x58 URaceEventDef* AuthoredEvent`.
+  - **Verified** (2026-10-19), stage 0: `GWorld, 0x1B0, 0x3F8, 0x10` → UTF-16 string. This is the
+    event ID to use. Works in every mode seen so far, including Precision where the track chain fails:
+    - arcade: `EVT_ARC_<mode>_<vehicle>_<track>_<variant>` — `EVT_ARC_PRE_BIKE_MAS_A_FWD`
+      (arcade, Precision, bike, Mastiff, variant A), `EVT_ARC_TMR_PLANE_BGL_PLANE_FWD`;
+    - campaign: `<MAP>_<race type>_<condition>` — `DAL_SHORT_06_TeamRace_Dry` (Dalmatian, team race, dry).
+  - `+0x30 LapCount` **verified** (matches `ARacingGameState.LapCount`, 100 in Elimination).
+  - `+0x58 AuthoredEvent → +0x321 Category` and `→ +0xB8 bShouldSkipCountdown` **verified in arcade**;
+    both read undefined in campaign.
 - `URaceEventDef`: `+0x30 FText PlayerFacingName`, `+0x50 UTrackDef*`, `+0x78 uint8 LapCount`,
   `+0xB8 bool bShouldSkipCountdown`, `+0x1A8 EStageToTriggerRollingStart RollingStartTrigger`.
 - Object names (`FName` in the UObject header) of the UTrackDef / URaceEventDef are probably the
@@ -412,16 +422,18 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [x] `CurrentLapNumber` is 0 until the first line crossing (HUD counter starts at 1).
 - [x] `CurrentLapNumber` ticks on the final crossing too: ends at LapCount+1.
 - [x] `bHasFinishedEvent` flips near-perfectly on the finish crossing (revisit if timing drift shows up).
-- [ ] `bIsRaceFinished` — player finish or all racers?
+- [x] `bIsRaceFinished` — player finish or all racers? Player-based (2026-10-19).
 - [x] Rolling-start events: what state sequence, and when does `bIsRaceStarted` flip?
 - [ ] Signatures for `GWorld` / `GEngine` in `SWGR-Win64-Shipping.exe` (UE5-style; verify the
       static address with UE4SS / Cheat Engine first, then write the sigscan).
 - [x] GWorld static address + GameState chains (RaceStartTime, bIsRaceStarted, LapCount) resolve live.
 - [x] Player race data and HUD VM chains resolve live.
-- [ ] Track internal name chain (`GWorld, 0x1B0, 0x3D8, 0x28, 0x50`) not resolving yet — recheck (FString: ptr at +0x0, int32 len at +0x8).
+- [x] Track internal name chain (`GWorld, 0x1B0, 0x3D8, 0x28, 0x50`): resolves for Time Trial / Podracing, bad in Precision, map-only in campaign. Superseded by the `FRaceEventInstance.InternalName` chain.
 - [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
 - [ ] Pause flag for an optional "pausing stops timer" setting.
-- [ ] `EArcadeEventCategories` chain (`…0x1B0, 0x3F8, 0x0, 0x58, 0x321`) resolves and reads Plane / Precision correctly.
+- [x] `EArcadeEventCategories` chain: correct chain is `…0x1B0, 0x3F8, 0x58, 0x321` (no `0x0`); reads Plane 2 live. Undefined in campaign.
+- [ ] Event `InternalName`s for Landspeeder Ace, The Experiment, and the Sebulba / Kestar finals.
+- [ ] Elimination events (`LapCount` 100): how lap splits and the finish behave; v0.4.1 `LapsSane` rejects them (BUGS.md #3).
 - [x] Which category values `FireIce` / `Advanced` / `Deluxe` events use (assumed Time Trial).
 - [x] Precision Driving IGT: HUD VM `CurrentEventTime` (0x188) already has the gate deductions;
       `CurrentLapTime` (0x178) is raw.
