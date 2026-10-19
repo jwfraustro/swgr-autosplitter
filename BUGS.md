@@ -1,7 +1,7 @@
 # Known bugs
 
 Open issues with the autosplitter. Dev-facing; background on the values involved is in
-`NOTES.md`.
+`DEV_NOTES.md`.
 
 ## 1. Final time ~0.01–0.03 s off the results screen
 
@@ -73,3 +73,17 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
   restart / exit. Relevant for Scenarios later: transitions between races go through the
   same teardown.
 - **Status:** fixed in v0.4.1.
+
+## 3. Elimination events fail the `LapsSane` gate (100 laps)
+
+- **Seen:** found while verifying readings (2026-10-19), not yet seen in a run. Elimination
+  campaign events report `LapCount` = 100 (GameState 0x370, also `URaceEventVM.NumLaps` and
+  `FRaceEventInstance.LapCount`). The race actually runs until only the top 3 racers remain, and
+  the HUD hides the lap total.
+- **Cause:** v0.4.1 `vars.LapsSane` requires `totalLaps < 100`, so `InRace` is false for the
+  whole event. Lap splits, the Race start and leave-race resets won't fire there.
+- **Matters for:** campaign categories (Sebulba%, Any%, NG+), not the arcade ILs.
+- **Fix (planned, refactor):** bound becomes `0 < totalLaps <= 100` (`SWGR_Autosplitter_Refactor.asl`
+  `LapsSane` TODO). Still to check in-game: whether `bHasFinishedEvent` flips when the player is
+  in the top 3 at the end, how `playerLap` behaves, and whether lap splits make sense there.
+- **Status:** open.
