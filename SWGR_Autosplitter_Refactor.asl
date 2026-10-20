@@ -168,8 +168,8 @@ startup
     };
 
     // Constants. Fill in as identities are found (DEV_NOTES M6 / M7). Compare against vars.EventId(now).
-    vars.EVENT_LANDSPEEDER_ACE = "";   // FIND  FRaceEventInstance.InternalName of Landspeeder Ace (Arcade% start, S5)
-    vars.EVENT_THE_EXPERIMENT  = "";   // FIND  ... of The Experiment (Arcade% end, E3)
+    vars.EVENT_LANDSPEEDER_ACE = "EVT_ARC_TT_CAR_MAS_A_SHORT_02";   // FIND  FRaceEventInstance.InternalName of Landspeeder Ace (Arcade% start, S5)
+    vars.EVENT_THE_EXPERIMENT  = "EVT_ARC_TT_CAR_WHP_A_FWD";   // FIND  ... of The Experiment (Arcade% end, E3)
     vars.EVENT_SEBULBA_FINAL   = "";   // FIND  ... of the Sebulba race, last race of Act I (E4)
     vars.EVENT_KESTAR_FINAL    = "";   // FIND  ... of the Kestar's Podracer race, last race of Act III (E5)
     vars.ACT_I   = 0;                  // LEAD  MainCampaignCurrentTourIx values; 0- or 1-based TBC
