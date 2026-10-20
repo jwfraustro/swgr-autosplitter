@@ -36,7 +36,16 @@
 //=====================================================================================================================================================================================================
 state("SWGR-Win64-Shipping")
 {
-    //--- A. ARacingGameState  (GWorld -> GameState: exe, 0xADFF928, 0x1B0). Only an ARacingGameState during a race; garbage otherwise.
+    //--- A0. Flow state machine  (GameState -> AActor.BlueprintCreatedComponents[0] = UGameFlowStateMachineComponent: exe, 0xADFF928, 0x1B0, 0x298, 0x0).
+    //    EVERY GameState carries it: USimpleRaceStateMachine in a race, UFrontEndStateMachine in the menus, UPaddockStateMachine in the campaign hub.
+    //    flowState alone is ambiguous (Paddock Leaving 5 == race Racing 5): always pair it with flowEnumCount, which identifies the machine.
+    //    Chain reads 0 through a level load (GameState destroyed) — that is the "None" machine, and it is expected, not an error.
+    int    flowState        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0, 0xC0, 0x10;        // VERIFIED  ActiveStateMachines[0].CurrentStateId — id in the machine's own enum (DEV_NOTES "Race flow state machine")
+    int    flowEnumCount    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0, 0xC0, 0x8, 0x50;   // VERIFIED  ActiveStateMachines[0].StateMachineStateIdEnum->Names.Num: 37 race, 16 front end, 9 paddock, 4 paddock narrative, >=14 pvp, 0 = loading
+    int    flowRecordCount  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0, 0xC8;              // VERIFIED (field)  ActiveStateMachines.Num — expect 1; Debug warning if ever 2 (record 0 may then be the wrong machine)
+    // byte   primaryFlow      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x398;                         // LEAD  UGfnGameInstance.PrimaryFlow (EGfnPrimaryFlow): Campaign 1, QuickRace 2, Arcade 3, Multiplayer 4 — per-profile sanity gate
+
+    //--- A. ARacingGameState  (GWorld -> GameState: exe, 0xADFF928, 0x1B0). Only an ARacingGameState while FlowMachine == "Race"; garbage otherwise.
     byte   raceStarted      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388;   // HAVE  bIsRaceStarted: 0 -> 1 when the grid is released (countdown over)
     int    totalLaps        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370;   // HAVE  LapCount: laps in this event. Elimination (campaign) events read 100 = "until top 3 remain"
     double raceStartTime    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378;   // HAVE  RaceStartTime (server time): base for lap-split IGT; dead-race guard
@@ -44,7 +53,6 @@ state("SWGR-Win64-Shipping")
     double countdownEndTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x368;   // VERIFIED  CountdownEndTime: server-time stamp on the RaceStartTime clock (e.g. 1670.018), not a 3.0 s countdown
     int    activeStage      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x408;   // VERIFIED  EventRecipeState.ActiveStage: 0-indexed stage in the recipe (M9)
     int    stageCount       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x400;   // VERIFIED  EventRecipe.EventStages.Num (TArray count = data ptr + 0x8) (M9)
-    // int    raceFlowState    : ???;                                                   // FIND  ESimpleRaceGameModeState via UGameFlowStateMachineComponent; owner unknown (DEV_NOTES "Race flow state machine")
 
     //--- B. URaceEventVM  (HUD view model: GameState + 0x3D8). Pointer is 0 / chain breaks once the player leaves the race.
     long   hudVM            : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8;          // HAVE  presence == HUD exists
@@ -89,10 +97,8 @@ state("SWGR-Win64-Shipping")
     // long   campaignDifficulty : ???, 0xE0, 0x110;  // LEAD  MetaProgression -> LastPickedDifficulty (UCampaignDifficultyDef*). Champion% warning only (M10)
     // byte   continueRunState   : ???;               // LEAD  EContinueRunState: Paddock 0 ... StartEvent 4, PostEvent 5, LeavePlanet 6 — between-race phases (M11)
 
-    //--- F. Front end / menus
-    // byte   arcadeStartPressed  : ???;   // FIND  Arcade "Start Event" pressed (M4) / Scenario start (M5). Lead: UArcadeEntryVM, EFrontEndFlowState
-    // long   arcadeSelectedEvent : ???;   // FIND  which arcade event is selected — must be Landspeeder Ace for Arcade% (M4)
-    // byte   frontEndFlowState   : ???;   // LEAD  EFrontEndFlowState — "in a menu, not a load"
+    //--- F. Front end / menus.  "Start Event" / scenario start (M4, M5) are now flow edges (A0: leaving FrontEnd.PrimaryModeSelect); the selected event is read
+    //    from stageName once the race loads. Only the medal result is still a hunt.
     // byte   medalResult         : ???;   // FIND  Bronze beaten on the finished event (M8). Fallback: finishTime vs the event def's Bronze time
 
     //--- G. Engine / misc
@@ -146,6 +152,8 @@ startup
     //--- Timing
     settings.Add("PauseStopsTimer", false, "Pausing stops Game Time (not implemented)");
         settings.SetToolTip("PauseStopsTimer", "Needs the pause flag (REFACTOR.md: pauserPlayerState LEAD). Does nothing yet.");
+    settings.Add("MenuStartTrust", false, "Menu-press starts: start the timer on the press (trust, reset if the game goes elsewhere)");
+        settings.SetToolTip("MenuStartTrust", "Arcade% / Scenarios start from a menu press that leads into a level load. Off (default): the timer appears once the race confirms the expected event, backdated to the press. On: the timer starts the instant the menu is left, and resets if the game lands somewhere else. Same recorded time either way. REFACTOR.md 'Start States' latch-and-confirm.");
 
     //--- Debug
     settings.Add("Debug", false, "Debug output");
@@ -166,6 +174,17 @@ startup
     vars.ACT_III = 2;                  // LEAD
     vars.PRECISION_GATE_SECONDS = 1.5; // VERIFIED
     vars.SCENARIO_RACE_COUNT    = 5;   // rules
+
+    // Flow state machine (A0). Machine from the state-id enum's entry count (VERIFIED 2026-10-19); state ids from Griffin_enums.hpp.
+    vars.FlowMachines = new Dictionary<int, string> { { 37, "Race" }, { 16, "FrontEnd" }, { 9, "Paddock" }, { 4, "PaddockNarrative" } };   // EPvpFlowState (>=14) not needed: singleplayer only
+    // ESimpleRaceGameModeState ("Race")
+    vars.RACE_LOADING = 1;  vars.RACE_WAIT_LEVEL = 10;  vars.RACE_WAIT_CLIENTS = 11;  vars.RACE_PRERACE = 12;  vars.RACE_INTRO = 13;
+    vars.RACE_COUNTDOWN = 4;  vars.RACE_ROLLING_START = 18;  vars.RACE_RACING = 5;  vars.RACE_INTERMISSION = 23;
+    vars.RACE_POSTRACE = 6;  vars.RACE_OUTRO = 14;  vars.RACE_RESULTS = 15;  vars.RACE_PREPARE_TO_LEAVE = 30;  vars.RACE_LEAVING = 8;
+    // EFrontEndFlowState ("FrontEnd")
+    vars.FE_ROOT = 0;  vars.FE_PRIMARY_MODE_SELECT = 1;  vars.FE_LAUNCHING_CAMPAIGN = 2;  vars.FE_QUICKRACE_SETUP = 3;  vars.FE_LAUNCHING_QUICKRACE = 4;
+    // EPaddockFlowState ("Paddock")
+    vars.PAD_ROOT = 0;  vars.PAD_INTRO = 1;  vars.PAD_CAMPAIGN_SETUP = 2;  vars.PAD_PREWORLD = 3;  vars.PAD_INWORLD = 4;  vars.PAD_LEAVING = 5;
 
     refreshRate = 60;
 }
@@ -188,10 +207,11 @@ init
     //--- 3a. Gates ("where are we?")
 
     // Does GameState look like an ARacingGameState? (same offsets read garbage from the menu GameState)
-    // Definition: LapsSane for now; later a class check or raceFlowState.                       HAVE (inside v0.4.1 InRace)   TODO(step1)
+    // Definition: s.FlowMachine == "Race" (&& LapsSane as belt-and-braces; v0.4.1 had only LapsSane).   VERIFIED readings   TODO(step2)
     vars.IsRaceGameState = (Func<dynamic, bool>)((s) => false);
 
-    // Is the local player in a live race?  Definition: HudVmPresent && LapsSane.                HAVE (v0.4.1 vars.InRace)     TODO(step1)
+    // Is the local player in a live race?  Definition: HudVmPresent && LapsSane — UNCHANGED from v0.4.1; the ILs must not change behaviour.
+    // Flow in Race.{Countdown, Racing, RollingStart} is a Debug cross-check, not a replacement.    HAVE (v0.4.1 vars.InRace)     TODO(step1)
     vars.InRace = (Func<dynamic, bool>)((s) => false);
 
     // ...and do the lap counters agree?  Definition: InRace && LapsInSync (hudLap == playerLap + 1). Only stable away from a crossing.
@@ -201,15 +221,16 @@ init
     // Is the game paused?  Definition: pauserPlayerState != 0.                                   LEAD (reading commented out)   TODO(step8)
     vars.IsPaused = (Func<dynamic, bool>)((s) => false);
 
-    // Between levels / race not live?  Definition: raceFlowState in {LoadingPhase 1, WaitForLevelToLoad 10}; fallback !HudVmPresent && Run.Phase == "Between".
-    //                                                                                             LEAD / FIND                   TODO(step5)
+    // Between levels / race not live?  Definition: FlowMachine == "None" (chain broken: GameState destroyed) || Race in {LOADING 1, WAIT_LEVEL 10, WAIT_CLIENTS 11}.
+    //                                                                                             VERIFIED readings             TODO(step5)
     vars.IsLoading = (Func<dynamic, bool>)((s) => false);
 
-    // In the front end (menu), not a race, not a load?  Definition: frontEndFlowState set && !InRace.   LEAD   TODO(step6/7)
+    // In a menu (front end or paddock), not a race, not a load?  Definition: FlowMachine in {"FrontEnd", "Paddock"}.   VERIFIED readings   TODO(step5)
     vars.InMenu = (Func<dynamic, bool>)((s) => false);
 
     // Did the race we were in just go away (restart / quit / between races)?
-    // Definition: p.InRace && !n.InRace, or p.playerLap >= 1 && n.playerLap == 0.                HAVE (v0.4.1 reset conditions)   TODO(step1)
+    // Definition: p.FlowMachine == "Race" && (n.FlowMachine != "Race" || n.FlowState in {PREPARE_TO_LEAVE 30, LEAVING 8});
+    // fallback (v0.4.1): p.InRace && !n.InRace, or p.playerLap >= 1 && n.playerLap == 0.         HAVE (v0.4.1 reset conditions) + VERIFIED flow   TODO(step1 fallback, step2 flow)
     vars.IsTearingDown = (Func<dynamic, dynamic, bool>)((p, n) => false);
 
     //--- 3b. Edges ("what just happened?")  — all (p, n). Start edges must also pass vars.NewRaceInstance.
@@ -238,17 +259,38 @@ init
     // Definition: n.RaceStamp != Run.DeadRaceStamp && n.LapStamp != Run.DeadLapStamp.             HAVE (v0.4.1 inline in start)   TODO(step1)
     vars.NewRaceInstance = (Func<dynamic, dynamic, bool>)((p, n) => false);
 
-    // New campaign / campaign reset confirmed: playingPrologue 0 -> 1 (covers M1 and M2; profile decides which).   VERIFIED field, chain TBD   TODO(step6)
+    //--- Flow edges (A0). Implemented: they are pure string compares on the snapshot and are needed in step 1 to record the state sequences.
+    // Any flow transition, including into/out of "None" (level load).
+    vars.FlowEdge  = (Func<dynamic, dynamic, bool>)((p, n) => p.Flow != n.Flow);
+    // Entered machine.state this tick.   e.g. vars.FlowEnter(p, n, "Paddock", vars.PAD_INWORLD)
+    vars.FlowEnter = (Func<dynamic, dynamic, string, int, bool>)((p, n, machine, state) => p.Flow != n.Flow && n.FlowMachine == machine && n.FlowState == state);
+    // Left machine.state this tick (to anything, including "None").
+    vars.FlowLeave = (Func<dynamic, dynamic, string, int, bool>)((p, n, machine, state) => p.Flow != n.Flow && p.FlowMachine == machine && p.FlowState == state);
+
+    // New campaign / campaign reset confirmed: playingPrologue 0 -> 1 (covers M1 and M2; profile decides which).
+    // Flow cross-check for a new campaign: FlowLeave(FrontEnd, PRIMARY_MODE_SELECT) -> FrontEnd.LAUNCHING_CAMPAIGN; the reset-Accept sequence is not recorded yet.
+    //                                                                                             VERIFIED field, chain TBD   TODO(step6)
     vars.PrologueEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
 
-    // Act III loadout "Continue": activeRun 0 -> non-zero && CampaignAct == ACT_III.               VERIFIED field, chain + index TBD   TODO(step6)
-    vars.ActIIIContinueEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Act III "Start Run" -> loadout -> Continue: FlowEnter(Paddock, INWORLD 4) from Paddock.{CAMPAIGN_SETUP 2, PREWORLD 3} && CampaignAct == ACT_III.
+    // Same machine, no level load: a clean single-tick edge. activeRun 0 -> non-zero confirms a run START rather than a resume.
+    //                                                                                             VERIFIED flow; Act index + activeRun chain TBD   TODO(step6)
+    vars.ActIIIStartRunEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
 
-    // Arcade "Start Event" pressed with Landspeeder Ace selected.                                   FIND (M4)   TODO(step7)
-    vars.ArcadeStartEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Menu departure = the "Start Event" / scenario start press, within one poll: FlowLeave(FrontEnd, PRIMARY_MODE_SELECT 1).
+    // ARMS the run (Run.ArmedAt / ArmedFrom, Phase = "Armed"); does not start by itself unless settings["MenuStartTrust"].
+    // Exact sequence after the press TBC (straight to "None", or via FrontEnd.LAUNCHING_QUICKRACE 4 first?) — record it with the Debug flow log.
+    //                                                                                             VERIFIED readings, sequence TBC   TODO(step5)
+    vars.MenuDepartureEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
 
-    // Scenario start confirmed (exact point TBD with the mods).                                    FIND (M5)   TODO(step7)
-    vars.ScenarioStartEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Arrival confirmed: Run.Phase == "Armed" && FlowEnter(Race, *) && vars.IsEvent(n, eventId). Under the backdated policy this is the start tick,
+    // with timer.Run.Offset = -(DateTime.Now - Run.ArmedAt). stageName is populated with the GameState, so EventId is readable from Race.LOADING on.
+    //                                                                                             VERIFIED readings   TODO(step5)
+    vars.ArrivalConfirmEdge = (Func<dynamic, dynamic, string, bool>)((p, n, eventId) => false);
+
+    // Arrival wrong: Run.Phase == "Armed" && (FlowEnter(FrontEnd, *) || (n.FlowMachine == "Race" && n.EventId != "" && n.EventId != expected)).
+    // Backdated policy: drop the arm (Phase = "Idle"). Trust policy: reset (R7).                 VERIFIED readings   TODO(step5)
+    vars.ArrivalWrongEdge = (Func<dynamic, dynamic, string, bool>)((p, n, eventId) => false);
 
     //--- 3c. Timing ("what time is it?")  — all (s) -> double, in seconds.
 
@@ -312,6 +354,10 @@ init
         dynamic s = new System.Dynamic.ExpandoObject();
 
         //--- raw copies (so predicates never need `current`)
+        s.flowState          = c.flowState;             // VERIFIED  (A0)
+        s.flowEnumCount      = c.flowEnumCount;         // VERIFIED  (A0)
+        s.flowRecordCount    = c.flowRecordCount;       // VERIFIED field (A0)
+        // s.primaryFlow     = c.primaryFlow;           // LEAD
         s.raceStarted        = c.raceStarted;
         s.totalLaps          = c.totalLaps;
         s.raceStartTime      = c.raceStartTime;
@@ -324,7 +370,6 @@ init
         s.finishTime         = c.finishTime;
         s.bonusTime          = c.bonusTime;
         s.lapStartServerTime = c.lapStartServerTime;
-        // s.raceFlowState   = c.raceFlowState;        // FIND
         s.raceFinished       = c.raceFinished;          // VERIFIED  player-based
         s.countdownEndTime   = c.countdownEndTime;      // VERIFIED
         s.activeStage        = c.activeStage;           // VERIFIED (M9)
@@ -347,6 +392,15 @@ init
         // s.campaignAct     = c.campaignAct;          // LEAD
         // s.pauserPlayerState = c.pauserPlayerState;  // LEAD
 
+        //--- derived: flow (A0). Implemented — read-only, and step 1 needs it to log the state sequences.
+        //    FlowMachine: "None" while the chain is broken (level load), "Unknown" for a count we don't map, else the machine name.
+        var machines = (Dictionary<int, string>)vars.FlowMachines;
+        int cnt = (int)c.flowEnumCount;
+        string fm = (cnt == 0) ? "None" : (machines.ContainsKey(cnt) ? machines[cnt] : "Unknown");
+        s.FlowMachine = fm;
+        s.FlowState   = (int)c.flowState;
+        s.Flow        = (fm == "None") ? "None" : fm + "." + s.FlowState;                     // e.g. "Race.5", "Paddock.4" — the key edges are detected on
+
         //--- derived: presence / sanity                                                         status      step
         s.HudVmPresent = c.hudVM != 0;                                                        // HAVE        step1
         s.LapsSane     = false;  // TODO(step1): totalLaps in (0, 100] && 0 <= playerLap <= totalLaps + 1   (v0.4.1 vars.LapsSane)
@@ -356,7 +410,8 @@ init
         s.Finished     = c.finished != 0;                                                     // HAVE        step1
         s.Failed       = false;  // TODO(step5): timedOut || wrecked || eliminated || failReasons != 0     wrecked/failReasons VERIFIED; timedOut/eliminated LEAD
         s.Paused       = false;  // TODO(step8): vars.IsPaused(s)                                          LEAD
-        s.Loading      = false;  // TODO(step5): vars.IsLoading(s)                                         LEAD / FIND
+        s.Loading      = false;  // TODO(step5): vars.IsLoading(s)   — FlowMachine == "None" || Race in {1, 10, 11}   VERIFIED readings
+        s.InMenu       = false;  // TODO(step5): vars.InMenu(s)      — FlowMachine in {"FrontEnd", "Paddock"}         VERIFIED readings
 
         //--- derived: identity
         s.EventKind    = "Unknown"; // TODO(optional): vars.EventKind(s)   — Debug warning only
@@ -390,7 +445,11 @@ init
     {
         dynamic r = new System.Dynamic.ExpandoObject();
         r.Profile             = null;    // set by vars.SelectProfile()
-        r.Phase               = "Idle";  // Idle -> Armed (menu start seen, no race yet) -> InRace -> Between (race done, next not loaded) -> Done
+        r.Phase               = "Idle";  // Idle -> Armed (menu start seen, no race yet) -> InRace -> Between (race done, next not loaded) -> Done.
+                                         // Except for Armed / Done this is a PROJECTION of Now.Flow (REFACTOR.md "Run state"): FrontEnd.* => Idle,
+                                         // Race.{4, 5, 18} => InRace, Race.{6, 14, 15, 30, 8} / Paddock.* / None => Between.
+        r.ArmedAt             = DateTime.MinValue;  // wall-clock stamp of the menu departure that armed the run (latch-and-confirm; backdated start offset)
+        r.ArmedFrom           = "";      // Flow key we departed from (e.g. "FrontEnd.1"), for the Debug log and ArrivalWrongEdge
         r.EventsDone          = 0;       // races / events completed in this run
         r.IgtTotal            = 0.0;     // sum of FinishIgt over completed races (the Game Time column for RTA categories)
         r.LastEventId         = "";      // identity of the race last entered
@@ -422,7 +481,7 @@ init
     //=================================================================================================================================================================================================
     // 5. PROFILES  (REFACTOR.md "Category profiles", "Start States", "End States", "Reset / ignore states")
     // One record per category. Fields: Name, Start(p,n), IsEnd(p,n), SplitOnLap, SplitOnRace, ResetPolicy ("IL" | "Multi"), RankedBy, ExpectedEventKind (Debug only).
-    // S1..S7 / E1..E5 / R1..R6 are the catalogue numbers in REFACTOR.md.
+    // S1..S6 / E1..E5 / R1..R7 are the catalogue numbers in REFACTOR.md.
     //=================================================================================================================================================================================================
     vars.MakeProfile = (Func<string, string, Func<dynamic, dynamic, bool>, Func<dynamic, dynamic, bool>, bool, bool, string, string, dynamic>)
         ((name, rankedBy, start, isEnd, splitOnLap, splitOnRace, resetPolicy, expectedKind) =>
@@ -437,11 +496,13 @@ init
     Func<dynamic, dynamic, bool> S1_FirstCrossing   = (p, n) => vars.FirstCrossingEdge(p, n);                                              // HAVE      Time Trial, Precision
     Func<dynamic, dynamic, bool> S2_GridGo          = (p, n) => vars.RaceGoEdge(p, n);                                                     // HAVE      Podracing
     Func<dynamic, dynamic, bool> S3_Prologue        = (p, n) => vars.PrologueEdge(p, n);                                                   // VERIFIED  Sebulba%, Any%, NG+ x3. Same flag for new campaign and reset.
-    Func<dynamic, dynamic, bool> S4_ActIIIContinue  = (p, n) => vars.ActIIIContinueEdge(p, n);                                             // VERIFIED  NG+ Act III
-    Func<dynamic, dynamic, bool> S5_ArcadeStart     = (p, n) => vars.ArcadeStartEdge(p, n);                                                // FIND M4   Arcade%
-    Func<dynamic, dynamic, bool> S6_ScenarioStart   = (p, n) => vars.ScenarioStartEdge(p, n);                                              // FIND M5   Scenarios
-    // S7 fallback (first race's go while Phase == Idle) — only if S5 / S6 can't be found; the timer would start late vs the video-timed rule.
-    Func<dynamic, dynamic, bool> S7_FirstRaceGo     = (p, n) => vars.RaceGoEdge(p, n) && vars.Run.Phase == "Idle";
+    Func<dynamic, dynamic, bool> S4_ActIIIStartRun  = (p, n) => vars.ActIIIStartRunEdge(p, n);                                             // VERIFIED flow  NG+ Act III (Paddock.2 -> Paddock.4)
+    // S5 / S6 are latch-and-confirm (REFACTOR.md "Start States"): the profile's Start fires on the CONFIRMING tick under the default (backdated)
+    // policy, or on the departure tick under settings["MenuStartTrust"]. MenuDepartureEdge itself only arms the run, in update{}.
+    Func<dynamic, dynamic, bool> S5_ArcadeStart     = (p, n) => settings["MenuStartTrust"] ? vars.MenuDepartureEdge(p, n)
+                                                                                           : vars.ArrivalConfirmEdge(p, n, vars.EVENT_LANDSPEEDER_ACE);   // VERIFIED readings; event name FIND   Arcade%
+    Func<dynamic, dynamic, bool> S6_ScenarioStart   = (p, n) => settings["MenuStartTrust"] ? vars.MenuDepartureEdge(p, n)
+                                                                                           : vars.ArrivalConfirmEdge(p, n, "");                           // VERIFIED readings; "" = any event with stageCount > 1   Scenarios
 
     Func<dynamic, dynamic, bool> E1_SingleFinish    = (p, n) => vars.FinishEdge(p, n);                                                     // HAVE      all ILs
     Func<dynamic, dynamic, bool> E2_LastScenarioRace= (p, n) => vars.FinishEdge(p, n) && (n.IsLastStage || vars.Run.EventsDone + 1 >= vars.SCENARIO_RACE_COUNT); // LEAD M9
@@ -454,14 +515,14 @@ init
     vars.Profiles["Cat_TimeTrial"]    = vars.MakeProfile("Arcade — Time Trial",        "IGT",    S1_FirstCrossing,   E1_SingleFinish,      true,  false, "IL",    "TimeTrial");
     vars.Profiles["Cat_Precision"]    = vars.MakeProfile("Arcade — Precision Driving", "IGT",    S1_FirstCrossing,   E1_SingleFinish,      true,  false, "IL",    "Precision");
     vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Tales of Podracing",         "IGT",    S2_GridGo,          E1_SingleFinish,      true,  false, "IL",    "Podracing");
-    vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "RTA",    S6_ScenarioStart,   E2_LastScenarioRace,  false, true,  "Multi", "Scenario");   // S7 fallback until M5 is found
-    vars.Profiles["Cat_ArcadePct"]    = vars.MakeProfile("Arcade%",                    "RTA",    S5_ArcadeStart,     E3_ExperimentBronze,  false, true,  "Multi", "");           // S7 fallback until M4 is found
+    vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "RTA",    S6_ScenarioStart,   E2_LastScenarioRace,  false, true,  "Multi", "Scenario");
+    vars.Profiles["Cat_ArcadePct"]    = vars.MakeProfile("Arcade%",                    "RTA",    S5_ArcadeStart,     E3_ExperimentBronze,  false, true,  "Multi", "");
     vars.Profiles["Cat_SebulbaPct"]   = vars.MakeProfile("Sebulba%",                   "RTA",    S3_Prologue,        E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
     vars.Profiles["Cat_AnyPct"]       = vars.MakeProfile("Any%",                       "RTA",    S3_Prologue,        E5_KestarFinal,       false, true,  "Multi", "Campaign");
     vars.Profiles["Cat_NGSebulbaPct"] = vars.MakeProfile("NG+ Sebulba%",               "RTA",    S3_Prologue,        E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
     vars.Profiles["Cat_NGAnyPct"]     = vars.MakeProfile("NG+ Any%",                   "RTA",    S3_Prologue,        E5_KestarFinal,       false, true,  "Multi", "Campaign");
     vars.Profiles["Cat_NGChampion"]   = vars.MakeProfile("NG+ Champion%",              "RTA",    S3_Prologue,        E5_KestarFinal,       false, true,  "Multi", "Campaign");
-    vars.Profiles["Cat_NGActIII"]     = vars.MakeProfile("NG+ Act III",                "RTA",    S4_ActIIIContinue,  E5_KestarFinal,       false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_NGActIII"]     = vars.MakeProfile("NG+ Act III",                "RTA",    S4_ActIIIStartRun,  E5_KestarFinal,       false, true,  "Multi", "Campaign");
 
     // First ticked category wins. Returns true if the profile changed — this is REFACTOR.md's CategoryChanged edge (R6: reset run state, not the timer).
     vars.SelectProfile = (Func<bool>)(() =>
@@ -499,11 +560,14 @@ update
     // TODO(step3): if (vars.RaceEnteredEdge(p, n))  vars.OnRaceEntered(p, n);
     // TODO(step5): if (vars.FailEdge(p, n))         vars.OnRaceFailed(p, n);
     // TODO(step3): if (vars.FinishEdge(p, n) && !n.Failed && !retry) vars.OnRaceFinished(p, n);
-    // TODO(step6/7): menu-press start edges set Run.Phase = "Armed" (the first RaceEnteredEdge then moves it to "InRace").
+    // TODO(step3): project Run.Phase from n.Flow unless Phase is "Armed" or "Done" (REFACTOR.md "Run state").
+    // TODO(step5): if (Run.Phase == "Idle" && Profile uses S5/S6 && vars.MenuDepartureEdge(p, n)) { Run.ArmedAt = DateTime.Now; Run.ArmedFrom = p.Flow; Run.Phase = "Armed"; }
+    // TODO(step5): if (Run.Phase == "Armed" && vars.ArrivalWrongEdge(p, n, expected) && !settings["MenuStartTrust"]) { Run.Phase = "Idle"; }   (trust policy: reset{} R7 handles it)
 
     // Debug: print raw edges (port of v0.4.1 update{}) and derived edges.
     if (settings["Debug"])
     {
+        if (vars.FlowEdge(p, n))            vars.Log("flow " + p.Flow + " -> " + n.Flow + (n.flowRecordCount > 1 ? "  WARNING: " + n.flowRecordCount + " active state machines" : ""));
         if (n.raceStarted != p.raceStarted) vars.Log("raceStarted " + p.raceStarted + " -> " + n.raceStarted + "  (RaceStamp " + n.RaceStamp + ")");
         if (n.playerLap   != p.playerLap)   vars.Log("playerLap "   + p.playerLap   + " -> " + n.playerLap + "  hudLap " + n.hudLap + "  totalLaps " + n.totalLaps + "  LapStamp " + n.LapStamp);
         if (n.finished    != p.finished)    vars.Log("finished "    + p.finished    + " -> " + n.finished + "  finishTime " + n.finishTime + "  bonusTime " + n.bonusTime);
@@ -548,10 +612,12 @@ start
 
     // Shared guards:
     //   - run.Phase == "Idle"                      (a run in progress never re-starts; R5 handles "runner restarted the category")
-    //   - vars.NewRaceInstance(p, n) for race-value starts (S1, S2, S7) — rejects the torn-down race's replayed memory (BUGS.md #2)
-    //   - menu-press starts (S3..S6) fire outside a race; they set run.Phase = "Armed" (in update{}) rather than relying on race values.
-    // TODO(step2): if (run.Phase != "Idle") return false;
+    //   - vars.NewRaceInstance(p, n) for race-value starts (S1, S2) — rejects the torn-down race's replayed memory (BUGS.md #2)
+    //   - flow-edge starts (S3, S4, and S5/S6 under MenuStartTrust) fire outside a race and need no race-value guard.
+    //   - S5/S6 under the default (backdated) policy fire while run.Phase == "Armed", on the confirming tick; the Phase guard below must allow that.
+    // TODO(step2): if (run.Phase != "Idle" && !(run.Phase == "Armed" && !settings["MenuStartTrust"])) return false;
     // TODO(step2): bool fired = run.Profile.Start(p, n);
+    // TODO(step5): if (fired && run.Phase == "Armed") timer.Run.Offset = -(DateTime.Now - run.ArmedAt);   // backdate to the press (set in start{} — onStart fires after the timer is already running)
     // TODO(step2): if (fired && run.Profile.ResetPolicy == "IL" && !vars.NewRaceInstance(p, n)) { vars.Log("start rejected: torn-down race stamps"); return false; }
     // TODO(step2): if (fired) vars.Log("START (" + run.Profile.Name + ")");
     // TODO(step2): return fired;
@@ -599,9 +665,11 @@ reset
     else // "Multi"
     {
         // R1/R2/R3: teardowns and fails between races are expected -> never reset on them.
-        // R4: back at the main menu for a long time with Phase in {Armed, InRace, Between} -> maybe; default is to leave it to the runner.
+        // R4: FlowEnter(FrontEnd, ROOT / PRIMARY_MODE_SELECT) with Phase in {InRace, Between} — the runner backed out to the main menu. Crisp edge now; still default OFF.
         // R5: a fresh S3/S4/S5/S6 edge while Phase != Idle -> reset (then start{} fires on the same or next tick).
-        // TODO(step5/6): if (run.Phase != "Idle" && run.Profile.Start(p, n)) { vars.Log("RESET: category start seen mid-run"); return true; }
+        // R7: trust policy only — Armed and the press led somewhere other than the expected event -> reset.
+        // TODO(step5/6): if (run.Phase != "Idle" && run.Phase != "Armed" && run.Profile.Start(p, n)) { vars.Log("RESET: category start seen mid-run"); return true; }
+        // TODO(step5):   if (run.Phase == "Armed" && settings["MenuStartTrust"] && vars.ArrivalWrongEdge(p, n, expected)) { vars.Log("RESET: menu start led to " + n.Flow + " / " + n.EventId); return true; }
         return false;
     }
 }
@@ -611,8 +679,8 @@ reset
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 onStart
 {
-    // TODO(step3): vars.Run.Phase = (race-value start) ? "InRace" : "Armed";  IgtTotal = 0; EventsDone = 0;
-    vars.Log("timer started");
+    // TODO(step3): vars.Run.Phase = (race-value start) ? "InRace" : "Armed";  IgtTotal = 0; EventsDone = 0;   (Phase is then projected from Flow each tick)
+    vars.Log("timer started" + (vars.Run.Phase == "Armed" ? " (armed from " + vars.Run.ArmedFrom + " at " + vars.Run.ArmedAt.ToString("HH:mm:ss.fff") + ")" : ""));
 }
 
 onReset
