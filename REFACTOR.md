@@ -424,18 +424,27 @@ Precision event under Time Trial — it never changes what the script does).
 
 Each step keeps the script shippable; ILs must not regress.
 
-0. Skeleton: function stubs, variables, placeholders where they do not exist.
-1. Introduce the snapshot layer and move the existing lambdas (`InRace`, `LapsSane`,
+0. ✅ Skeleton: function stubs, variables, placeholders where they do not exist.
+1. ✅ Introduce the snapshot layer and move the existing lambdas (`InRace`, `LapsSane`,
    `LapsInSync`) and dead-stamp capture onto it. Add the A0 readings and `FlowMachine` /
    `Flow` to the snapshot with a Debug line on every `FlowEdge` — read-only, so behaviour stays
    identical to v0.4.1 while the state sequences for each category get recorded.
-2. Extract the edges (`RaceGoEdge`, `FirstCrossingEdge`, `LapEdge`, `FinishEdge`) and the
-   timing functions; rewrite `start{}` / `split{}` / `gameTime{}` against them. Switch
-   `IsRaceGameState` and `IsTearingDown` to their flow definitions (fallbacks kept).
-3. Add `vars.Run` and `RunGameTime`; `IgtTotal` is 0 for ILs so nothing changes yet. `Phase`
-   is projected from `Flow`.
-4. Add profiles for the three IL categories (Time Trial, Precision, Podracing). Needs no new
-   memory: Precision already works through the adjusted `finishTime`.
+2. ✅ Extract the edges (`RaceGoEdge`, `FirstCrossingEdge`, `LapEdge`, `FinishEdge`) and the
+   timing functions; rewrite `start{}` / `split{}` / `gameTime{}` against them.
+   `IsRaceGameState` / `IsTearingDown` have their flow definitions, but the IL `reset{}` still
+   uses the verbatim v0.4.1 raw conditions — the flow versions take over in step 5.
+3. ✅ Add `vars.Run` and `RunGameTime`; `IgtTotal` is 0 for ILs so nothing changes yet.
+   `OnRaceFinished` owns the `IgtTotal` add; `gameTime{}` returns the total on the finish tick.
+   `Phase` moves on the bookkeeping edges for now; the full projection from `Flow` is step 5.
+4. ✅ Add profiles for the three IL categories (Time Trial, Precision, Podracing). Needs no new
+   memory: Precision already works through the adjusted `finishTime`. Profiles carry a
+   `StartStamp` ("Lap" / "Race" / "None") so the BUGS.md #2 guard checks the same stamp v0.4.1
+   did for each start kind.
+
+   Steps 1–4 landed 2026-10-19 in `SWGR_Autosplitter_Refactor.asl` (0.5.0-dev), **untested in
+   LiveSplit**. Intended differences from v0.4.1, and nothing else: `LapsSane` accepts 100 laps
+   (BUGS.md #3); with ResetOnLeave off and a running timer reused across races, Game Time is the
+   IGT *sum* rather than the last race's time.
 5. Add the multi-event reset policy and latch-and-confirm (`MenuDepartureEdge`,
    `ArrivalConfirmEdge`, `ArrivalWrongEdge`, the menu-start policy setting). Test on a
    Scenario: S6 is live as soon as the press sequence is recorded in step 1, so the

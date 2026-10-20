@@ -1,6 +1,8 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter (refactor)
-// Version: 0.5.0-skeleton  — NOT FUNCTIONAL. Bones only. Will replace SWGR_Autosplitter.asl (v0.4.1) when finished.
+// Version: 0.5.0-dev  — migration steps 1–4 implemented (REFACTOR.md): the three IL categories (Time Trial, Precision, Podracing) are
+//                       functional and meant to behave exactly like v0.4.1, except that Elimination events (100 laps) now pass LapsSane (BUGS.md #3).
+//                       UNTESTED in LiveSplit as of 2026-10-19. Multi-event categories (steps 5–7) are still stubs. Will replace SWGR_Autosplitter.asl (v0.4.1) when finished.
 //
 // READ FIRST
 //   REFACTOR.md   — the plan this file implements. Section names below match it. "Step N" = its Migration order.
@@ -207,57 +209,70 @@ init
     //--- 3a. Gates ("where are we?")
 
     // Does GameState look like an ARacingGameState? (same offsets read garbage from the menu GameState)
-    // Definition: s.FlowMachine == "Race" (&& LapsSane as belt-and-braces; v0.4.1 had only LapsSane).   VERIFIED readings   TODO(step2)
-    vars.IsRaceGameState = (Func<dynamic, bool>)((s) => false);
+    // Flow says so AND the lap values are sane (v0.4.1 had only LapsSane). Debug / cross-check only so far: InRace below is what the ILs run on.   VERIFIED readings
+    vars.IsRaceGameState = (Func<dynamic, bool>)((s) => s.FlowMachine == "Race" && s.LapsSane);
 
-    // Is the local player in a live race?  Definition: HudVmPresent && LapsSane — UNCHANGED from v0.4.1; the ILs must not change behaviour.
-    // Flow in Race.{Countdown, Racing, RollingStart} is a Debug cross-check, not a replacement.    HAVE (v0.4.1 vars.InRace)     TODO(step1)
-    vars.InRace = (Func<dynamic, bool>)((s) => false);
+    // Is the local player in a live race?  HudVmPresent && LapsSane — UNCHANGED from v0.4.1 (vars.InRace); the ILs must not change behaviour.
+    // Flow in Race.{Countdown, Racing, RollingStart} is a Debug cross-check, not a replacement.    HAVE (v0.4.1 vars.InRace)
+    vars.InRace = (Func<dynamic, bool>)((s) => s.HudVmPresent && s.LapsSane);
 
-    // ...and do the lap counters agree?  Definition: InRace && LapsInSync (hudLap == playerLap + 1). Only stable away from a crossing.
-    //                                                                                             HAVE (v0.4.1 InRace + LapsInSync)   TODO(step1)
-    vars.InRaceStrict = (Func<dynamic, bool>)((s) => false);
+    // ...and do the lap counters agree? Only stable away from a crossing (the two counters can update a tick apart).   HAVE (v0.4.1 InRace + LapsInSync)
+    vars.InRaceStrict = (Func<dynamic, bool>)((s) => s.HudVmPresent && s.LapsSane && s.LapsInSync);
 
     // Is the game paused?  Definition: pauserPlayerState != 0.                                   LEAD (reading commented out)   TODO(step8)
     vars.IsPaused = (Func<dynamic, bool>)((s) => false);
 
-    // Between levels / race not live?  Definition: FlowMachine == "None" (chain broken: GameState destroyed) || Race in {LOADING 1, WAIT_LEVEL 10, WAIT_CLIENTS 11}.
-    //                                                                                             VERIFIED readings             TODO(step5)
-    vars.IsLoading = (Func<dynamic, bool>)((s) => false);
+    // Between levels / race not live?  Chain broken (GameState destroyed) or the race machine is still loading.   VERIFIED readings. Not used by isLoading{} for ILs.
+    vars.IsLoading = (Func<dynamic, bool>)((s) =>
+        s.FlowMachine == "None"
+        || (s.FlowMachine == "Race" && (s.FlowState == vars.RACE_LOADING || s.FlowState == vars.RACE_WAIT_LEVEL || s.FlowState == vars.RACE_WAIT_CLIENTS)));
 
-    // In a menu (front end or paddock), not a race, not a load?  Definition: FlowMachine in {"FrontEnd", "Paddock"}.   VERIFIED readings   TODO(step5)
-    vars.InMenu = (Func<dynamic, bool>)((s) => false);
+    // In a menu (front end or paddock), not a race, not a load?                                   VERIFIED readings
+    vars.InMenu = (Func<dynamic, bool>)((s) => s.FlowMachine == "FrontEnd" || s.FlowMachine == "Paddock");
 
     // Did the race we were in just go away (restart / quit / between races)?
-    // Definition: p.FlowMachine == "Race" && (n.FlowMachine != "Race" || n.FlowState in {PREPARE_TO_LEAVE 30, LEAVING 8});
-    // fallback (v0.4.1): p.InRace && !n.InRace, or p.playerLap >= 1 && n.playerLap == 0.         HAVE (v0.4.1 reset conditions) + VERIFIED flow   TODO(step1 fallback, step2 flow)
-    vars.IsTearingDown = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Flow: the race machine left or entered PrepareToLeave / Leaving. Legacy (v0.4.1 reset conditions): HUD VM gone, or playerLap >= 1 -> 0.
+    // The IL reset{} keeps the exact v0.4.1 raw conditions; this union is for the multi-event policy and Debug.   HAVE + VERIFIED flow
+    vars.IsTearingDown = (Func<dynamic, dynamic, bool>)((p, n) =>
+        (p.FlowMachine == "Race" && (n.FlowMachine != "Race" || n.FlowState == vars.RACE_PREPARE_TO_LEAVE || n.FlowState == vars.RACE_LEAVING))
+        || (p.HudVmPresent && !n.HudVmPresent)
+        || (p.playerLap >= 1 && n.playerLap == 0));
 
-    //--- 3b. Edges ("what just happened?")  — all (p, n). Start edges must also pass vars.NewRaceInstance.
+    //--- 3b. Edges ("what just happened?")  — all (p, n). Race-value start edges must also pass vars.NewRaceInstance.
 
-    // Grid released: raceStarted 0 -> 1, InRaceStrict(n), fresh RaceStamp.                       HAVE (v0.4.1 "Race" start)     TODO(step2)
-    vars.RaceGoEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Grid released: raceStarted 0 -> 1 while in race, before the first crossing, counters in sync.   HAVE (v0.4.1 "Race" start, verbatim)
+    vars.RaceGoEdge = (Func<dynamic, dynamic, bool>)((p, n) =>
+        vars.InRace(n) && n.raceStarted == 1 && p.raceStarted == 0 && n.playerLap == 0 && n.LapsInSync);
 
-    // First start-line crossing (rolling start): playerLap 0 -> 1, !Finished, LapsSane, fresh LapStamp.
-    // Deliberately NOT gated on the HUD VM (DEV_NOTES "v0.1.0 field testing"): the VM can appear on/after the crossing tick.
-    //                                                                                             HAVE (v0.4.1 "Arcade" start)   TODO(step2)
-    vars.FirstCrossingEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // First start-line crossing (rolling start): playerLap 0 -> 1, !Finished, LapsSane.
+    // Deliberately NOT gated on the HUD VM (DEV_NOTES "v0.1.0 field testing"): the VM can appear on/after the crossing tick.   HAVE (v0.4.1 "Arcade" start, verbatim)
+    vars.FirstCrossingEdge = (Func<dynamic, dynamic, bool>)((p, n) =>
+        n.playerLap == 1 && p.playerLap == 0 && !n.Finished && n.LapsSane);
 
-    // Lap completed: playerLap k -> k+1 with 1 <= k < totalLaps, !Finished.                       HAVE (v0.4.1 split)            TODO(step2)
-    vars.LapEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Lap completed: playerLap k -> k+1 with 1 <= k < totalLaps, !Finished. (0 -> 1 is the start crossing; totalLaps -> totalLaps+1 is the finish.)   HAVE (v0.4.1 split)
+    vars.LapEdge = (Func<dynamic, dynamic, bool>)((p, n) =>
+        n.playerLap == p.playerLap + 1 && p.playerLap >= 1 && n.playerLap <= n.totalLaps && !n.Finished);
 
-    // Player crossed the final line: finished 0 -> 1.                                             HAVE (v0.4.1 split/gameTime)   TODO(step2)
-    vars.FinishEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Player crossed the final line: finished 0 -> 1. EventFinishTime lands on the same tick (BUGS.md #1).   HAVE (v0.4.1 split/gameTime)
+    vars.FinishEdge = (Func<dynamic, dynamic, bool>)((p, n) => n.Finished && !p.Finished);
 
-    // Player failed the event: Failed false -> true (timed out / wrecked / eliminated / failReasons).   LEAD   TODO(step5)
-    vars.FailEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Player failed the event: Failed false -> true. Computed, not yet acted on (IL reset R3 / multi retries are step 5).   VERIFIED readings (timedOut LEAD)
+    vars.FailEdge = (Func<dynamic, dynamic, bool>)((p, n) => n.Failed && !p.Failed);
 
-    // Entered a (new) race: !p.InRace && n.InRace with a RaceStamp we haven't seen.               —    TODO(step3)
-    vars.RaceEnteredEdge = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // Race identity established: in race with a live RaceStamp we have not booked yet (and not the dead race's).
+    // Arcade: fires at the first crossing (RaceStartTime is set there); grid events: at the countdown end. Drives OnRaceEntered.
+    vars.RaceEnteredEdge = (Func<dynamic, dynamic, bool>)((p, n) =>
+        vars.InRace(n) && n.RaceStamp != 0 && n.RaceStamp != vars.Run.LastRaceStamp && n.RaceStamp != vars.Run.DeadRaceStamp);
 
     // Is this a real new race and not the torn-down race's memory replaying (BUGS.md #2)?
-    // Definition: n.RaceStamp != Run.DeadRaceStamp && n.LapStamp != Run.DeadLapStamp.             HAVE (v0.4.1 inline in start)   TODO(step1)
-    vars.NewRaceInstance = (Func<dynamic, dynamic, bool>)((p, n) => false);
+    // `kind` says which stamp identifies the start — "Lap" for crossing starts (v0.4.1 Arcade checked LapStartServerTime),
+    // "Race" for grid starts (v0.4.1 Race checked RaceStartTime), "None" for flow-edge starts. A dead stamp of 0 means nothing was torn down yet.
+    vars.NewRaceInstance = (Func<dynamic, dynamic, string, bool>)((p, n, kind) =>
+    {
+        if (kind == "Lap")  return vars.Run.DeadLapStamp  == 0.0 || n.LapStamp  != vars.Run.DeadLapStamp;
+        if (kind == "Race") return vars.Run.DeadRaceStamp == 0.0 || n.RaceStamp != vars.Run.DeadRaceStamp;
+        return true;
+    });
 
     //--- Flow edges (A0). Implemented: they are pure string compares on the snapshot and are needed in step 1 to record the state sequences.
     // Any flow transition, including into/out of "None" (level load).
@@ -294,27 +309,27 @@ init
 
     //--- 3c. Timing ("what time is it?")  — all (s) -> double, in seconds.
 
-    // Running event IGT (Precision-adjusted): hudEventTime.                                        VERIFIED   TODO(step3; step8 for live use)
-    vars.EventIgt = (Func<dynamic, double>)((s) => 0.0);
+    // Running event IGT (Precision-adjusted): hudEventTime.                                        VERIFIED   (live use is step 8; BUGS.md #1 jitter)
+    vars.EventIgt = (Func<dynamic, double>)((s) => (double)s.hudEventTime);
 
-    // Running raw lap time: hudLapTime.                                                           VERIFIED   TODO(step3) (display/debug)
-    vars.LapIgt = (Func<dynamic, double>)((s) => 0.0);
+    // Running raw lap time: hudLapTime.                                                           VERIFIED   (display/debug)
+    vars.LapIgt = (Func<dynamic, double>)((s) => (double)s.hudLapTime);
 
-    // Exact elapsed race time at the last crossing: LapStamp - RaceStamp.                         HAVE (v0.4.1 gameTime lap edge)   TODO(step2)
-    vars.LapSplitIgt = (Func<dynamic, double>)((s) => 0.0);
+    // Exact elapsed race time at the last crossing: LapStamp - RaceStamp. RaceStamp = first-crossing stamp (Arcade) or countdown end (grid).   HAVE (v0.4.1 gameTime lap edge)
+    vars.LapSplitIgt = (Func<dynamic, double>)((s) => (double)s.LapStamp - (double)s.RaceStamp);
 
-    // Final adjusted time: finishTime (-1 before the finish).                                     HAVE (v0.4.1 gameTime finish)     TODO(step2)
-    vars.FinishIgt = (Func<dynamic, double>)((s) => -1.0);
+    // Final adjusted time: finishTime (-1 before the finish). Precision: gate deductions already applied.   HAVE (v0.4.1 gameTime finish)
+    vars.FinishIgt = (Func<dynamic, double>)((s) => (double)s.finishTime);
 
-    // Final unadjusted time: finishTime + bonusTime.                                              VERIFIED   TODO(step3) (Precision display)
-    vars.RawFinishIgt = (Func<dynamic, double>)((s) => -1.0);
+    // Final unadjusted time: finishTime + bonusTime.                                              VERIFIED   (Precision display)
+    vars.RawFinishIgt = (Func<dynamic, double>)((s) => (double)s.finishTime + (double)s.bonusTime);
 
-    // Precision gates driven through: round(bonusTime / PRECISION_GATE_SECONDS).                  VERIFIED   TODO(step3) (display)
-    vars.GatesHit = (Func<dynamic, int>)((s) => 0);
+    // Precision gates driven through: round(bonusTime / PRECISION_GATE_SECONDS).                  VERIFIED   (display)
+    vars.GatesHit = (Func<dynamic, int>)((s) => (int)Math.Round((double)s.bonusTime / vars.PRECISION_GATE_SECONDS));
 
-    // Game Time for the whole run: Run.IgtTotal + (InRace ? EventIgt : 0); snaps to IgtTotal + FinishIgt on the FinishEdge.
-    // Covers ILs (IgtTotal = 0) and multi-race runs with one formula. See REFACTOR.md note on live use vs real-time + re-sync.   TODO(step3)
-    vars.RunGameTime = (Func<dynamic, double>)((s) => 0.0);
+    // Game Time for the whole run: Run.IgtTotal + (InRace ? EventIgt : 0). Covers ILs (IgtTotal = 0) and multi-race runs with one formula.
+    // Defined for Debug / step 8; gameTime{} still runs on real time + stamp re-sync (v0.4.1 behaviour).
+    vars.RunGameTime = (Func<dynamic, double>)((s) => (double)vars.Run.IgtTotal + (s.InRace && !s.Finished ? vars.EventIgt(s) : 0.0));
 
     //--- 3d. Identity ("which race / event is this?")
 
@@ -324,19 +339,19 @@ init
 
     // Stable event name: stageName = EventStages[ActiveStage].InternalName. Arcade "EVT_ARC_<mode>_<vehicle>_<track>_<variant>"
     // (e.g. EVT_ARC_PRE_BIKE_MAS_A_FWD = arcade precision, bike, Mastiff); campaign "<MAP>_<race type>_<condition>"
-    // (e.g. DAL_SHORT_06_TeamRace_Dry). Works in every mode seen so far.                          VERIFIED (M6 / M7)   TODO(step6)
-    vars.EventId = (Func<dynamic, string>)((s) => "");
+    // (e.g. DAL_SHORT_06_TeamRace_Dry). Only meaningful while the race GameState exists; "" otherwise.   VERIFIED (M6 / M7)
+    vars.EventId = (Func<dynamic, string>)((s) => s.FlowMachine == "Race" ? (string)(s.stageName ?? "") : "");
 
-    // Is this the named event?  Definition: EventId(s) == name.                                   LEAD   TODO(step6)
-    vars.IsEvent = (Func<dynamic, string, bool>)((s, name) => false);
+    // Is this the named event?  An empty name never matches.                                      VERIFIED chain; names FIND
+    vars.IsEvent = (Func<dynamic, string, bool>)((s, name) => name != "" && s.EventId == name);
 
     // TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown. OPTIONAL — Debug mismatch warning only, never selects behaviour.
     // Definition: arcadeCategory if authoredEvent is an arcade def (Plane 2 -> Podracing, Precision 4 -> Precision, else TimeTrial);
     // Campaign if CampaignRunActive; Scenario if stageCount > 1 and not campaign.                 VERIFIED readings (arcadeCategory garbage in campaign: check campaign FIRST)   TODO(optional)
     vars.EventKind = (Func<dynamic, string>)((s) => "Unknown");
 
-    // Last race of a multi-stage recipe?  Definition: StageIndex == StageCount - 1 (ActiveStage is 0-indexed).   VERIFIED readings (M9)   TODO(step7)
-    vars.IsLastStage = (Func<dynamic, bool>)((s) => false);
+    // Last race of a multi-stage recipe?  StageIndex == StageCount - 1 (ActiveStage is 0-indexed). Only meaningful with the race GameState.   VERIFIED readings (M9)
+    vars.IsLastStage = (Func<dynamic, bool>)((s) => s.FlowMachine == "Race" && s.StageCount > 0 && s.StageIndex == s.StageCount - 1);
 
     // Did the finish beat the medal tier?  Definition: medalResult, or FinishIgt <= the event def's tier time.   FIND (M8)   TODO(step7)
     vars.MedalBeaten = (Func<dynamic, string, bool>)((s, tier) => false);
@@ -380,6 +395,7 @@ init
         s.eventPosition      = c.eventPosition;         // VERIFIED
         s.failReasons        = c.failReasons;           // VERIFIED
         s.wrecked            = c.wrecked;               // VERIFIED
+        s.eliminated         = c.eliminated;            // VERIFIED
         s.bestLapTime        = c.bestLapTime;           // VERIFIED
         s.prevLapTime        = c.prevLapTime;           // VERIFIED
         s.stageName          = c.stageName;             // VERIFIED  stage 0 only (see state{} D)
@@ -401,34 +417,35 @@ init
         s.FlowState   = (int)c.flowState;
         s.Flow        = (fm == "None") ? "None" : fm + "." + s.FlowState;                     // e.g. "Race.5", "Paddock.4" — the key edges are detected on
 
-        //--- derived: presence / sanity                                                         status      step
-        s.HudVmPresent = c.hudVM != 0;                                                        // HAVE        step1
-        s.LapsSane     = false;  // TODO(step1): totalLaps in (0, 100] && 0 <= playerLap <= totalLaps + 1   (v0.4.1 vars.LapsSane)
-        s.LapsInSync   = false;  // TODO(step1): hudLap == playerLap + 1                                   (v0.4.1 vars.LapsInSync)
-        s.InRace       = false;  // TODO(step1): vars.InRace(s)      — set AFTER LapsSane / HudVmPresent
-        s.RaceGo       = c.raceStarted != 0;                                                  // HAVE        step1
-        s.Finished     = c.finished != 0;                                                     // HAVE        step1
-        s.Failed       = false;  // TODO(step5): timedOut || wrecked || eliminated || failReasons != 0     wrecked/failReasons VERIFIED; timedOut/eliminated LEAD
+        //--- derived: presence / sanity                                                         status
+        s.HudVmPresent = c.hudVM != 0;                                                        // HAVE
+        // v0.4.1 bound was totalLaps < 100; Elimination events report 100 (BUGS.md #3), so the bound is now <= 100.
+        s.LapsSane     = c.totalLaps > 0 && c.totalLaps <= 100 && c.playerLap >= 0 && c.playerLap <= c.totalLaps + 1;   // HAVE (v0.4.1 vars.LapsSane)
+        s.LapsInSync   = c.hudLap == c.playerLap + 1;                                         // HAVE (v0.4.1 vars.LapsInSync)
+        s.InRace       = vars.InRace(s);                                                      // HAVE — after LapsSane / HudVmPresent
+        s.RaceGo       = c.raceStarted != 0;                                                  // HAVE
+        s.Finished     = c.finished != 0;                                                     // HAVE
+        s.Failed       = s.InRace && (c.wrecked != 0 || c.eliminated != 0 || c.failReasons != 0);   // VERIFIED readings (timedOut LEAD, not read). Garbage outside a race, hence the InRace gate
         s.Paused       = false;  // TODO(step8): vars.IsPaused(s)                                          LEAD
-        s.Loading      = false;  // TODO(step5): vars.IsLoading(s)   — FlowMachine == "None" || Race in {1, 10, 11}   VERIFIED readings
-        s.InMenu       = false;  // TODO(step5): vars.InMenu(s)      — FlowMachine in {"FrontEnd", "Paddock"}         VERIFIED readings
+        s.Loading      = vars.IsLoading(s);                                                   // VERIFIED readings
+        s.InMenu       = vars.InMenu(s);                                                      // VERIFIED readings
 
-        //--- derived: identity
+        //--- derived: identity (only meaningful while FlowMachine == "Race"; the lambdas guard that)
         s.EventKind    = "Unknown"; // TODO(optional): vars.EventKind(s)   — Debug warning only
-        s.EventId      = "";        // TODO(step6): vars.EventId(s)        VERIFIED chain (M6 / M7)
+        s.EventId      = vars.EventId(s);                                                     // VERIFIED chain (M6 / M7)
         s.MapId        = "";        // TODO(step6): vars.MapId(s)          PARTIAL
-        s.StageIndex   = -1;        // TODO(step7): activeStage            VERIFIED (M9)
-        s.StageCount   = -1;        // TODO(step7): stageCount             VERIFIED (M9)
-        s.IsLastStage  = false;     // TODO(step7): vars.IsLastStage(s)
+        s.StageIndex   = (fm == "Race") ? (int)c.activeStage : -1;                            // VERIFIED (M9)
+        s.StageCount   = (fm == "Race") ? (int)c.stageCount  : -1;                            // VERIFIED (M9)
+        s.IsLastStage  = vars.IsLastStage(s);
 
         //--- derived: timing
-        s.LapIgt       = 0.0;       // TODO(step3): vars.LapIgt(s)        VERIFIED
-        s.EventIgt     = 0.0;       // TODO(step3): vars.EventIgt(s)      VERIFIED
-        s.FinishIgt    = -1.0;      // TODO(step2): vars.FinishIgt(s)     HAVE
-        s.GateBonus    = 0.0;       // TODO(step3): bonusTime             VERIFIED
-        s.GatesHit     = 0;         // TODO(step3): vars.GatesHit(s)      VERIFIED
-        s.RaceStamp    = c.raceStartTime;                                                     // HAVE        identity of this race instance
-        s.LapStamp     = c.lapStartServerTime;                                                // HAVE
+        s.LapIgt       = vars.LapIgt(s);                                                      // VERIFIED
+        s.EventIgt     = vars.EventIgt(s);                                                    // VERIFIED
+        s.FinishIgt    = vars.FinishIgt(s);                                                   // HAVE   -1 before the finish
+        s.GateBonus    = (double)c.bonusTime;                                                 // VERIFIED
+        s.GatesHit     = vars.GatesHit(s);                                                    // VERIFIED
+        s.RaceStamp    = (double)c.raceStartTime;                                             // HAVE   identity of this race instance
+        s.LapStamp     = (double)c.lapStartServerTime;                                        // HAVE
 
         //--- derived: campaign
         s.CampaignAct       = -1;    // TODO(step6): campaignAct                               LEAD
@@ -454,6 +471,7 @@ init
         r.IgtTotal            = 0.0;     // sum of FinishIgt over completed races (the Game Time column for RTA categories)
         r.LastEventId         = "";      // identity of the race last entered
         r.LastMapId           = "";
+        r.LastRaceStamp       = 0.0;     // RaceStamp of the race last booked by OnRaceEntered (so RaceEnteredEdge fires once per race)
         r.LastFinishedEventId = "";      // for retry detection (same EventId finishing again != progress)
         r.LastAttemptFailed   = false;   // set by OnRaceFailed; next RaceEnteredEdge with the same EventId is a retry
         r.DeadRaceStamp       = 0.0;     // torn-down race's RaceStartTime        (BUGS.md #2)
@@ -465,29 +483,54 @@ init
 
     //--- Bookkeeping (called from update{} in this order; the only writers of vars.Run besides the lifecycle blocks)
 
-    // On IsTearingDown(p, n): store p.RaceStamp / p.LapStamp (only non-zero readings) into Run.Dead*.   HAVE (v0.4.1 update)   TODO(step1)
-    vars.CaptureDeadStamps = (Action<dynamic, dynamic>)((p, n) => { });
+    // Remember the torn-down race's timestamps, only from real non-zero readings (BUGS.md #2).   HAVE (v0.4.1 update{}, verbatim)
+    // Runs on every teardown regardless of reset policy — Scenario transitions go through the same teardown.
+    vars.CaptureDeadStamps = (Action<dynamic, dynamic>)((p, n) =>
+    {
+        if (p.playerLap >= 1 && n.playerLap == 0 && p.LapStamp != 0.0)  vars.Run.DeadLapStamp  = p.LapStamp;
+        if (p.raceStarted == 1 && n.raceStarted == 0 && p.RaceStamp != 0.0) vars.Run.DeadRaceStamp = p.RaceStamp;
+    });
 
-    // On RaceEnteredEdge: Run.LastEventId / LastMapId = n.*, Phase = "InRace".                           TODO(step3)
-    vars.OnRaceEntered = (Action<dynamic, dynamic>)((p, n) => { });
+    // On RaceEnteredEdge: book the race's identity. Phase only moves while a run is in progress — an Idle run must stay Idle or start{} is blocked.
+    vars.OnRaceEntered = (Action<dynamic, dynamic>)((p, n) =>
+    {
+        vars.Run.LastEventId   = n.EventId;
+        vars.Run.LastMapId     = n.MapId;
+        vars.Run.LastRaceStamp = n.RaceStamp;
+        if (vars.Run.Phase == "Armed" || vars.Run.Phase == "Between") vars.Run.Phase = "InRace";
+        vars.Log("race entered: " + n.EventId + "  RaceStamp " + n.RaceStamp + "  laps " + n.totalLaps + "  flow " + n.Flow);
+    });
 
-    // On FinishEdge (not failed, not a retry): IgtTotal += n.FinishIgt, EventsDone++, LastFinishedEventId = n.EventId, Phase = "Between".
-    // Must run BEFORE gameTime{} reads RunGameTime on the finish tick (update{} runs first, so it does).   TODO(step3)
-    vars.OnRaceFinished = (Action<dynamic, dynamic>)((p, n) => { });
+    // On FinishEdge with a valid time (not a retry): IgtTotal += FinishIgt, EventsDone++, remember the event, Phase = "Between".
+    // Owns the IgtTotal add — gameTime{} returns Run.IgtTotal on the finish tick and must NOT add again. update{} runs before gameTime{}, so the order holds.
+    vars.OnRaceFinished = (Action<dynamic, dynamic>)((p, n) =>
+    {
+        vars.Run.IgtTotal           += n.FinishIgt;
+        vars.Run.EventsDone         += 1;
+        vars.Run.LastFinishedEventId = n.EventId;
+        vars.Run.LastAttemptFailed   = false;
+        if (vars.Run.Phase == "InRace") vars.Run.Phase = "Between";
+        vars.Log("race finished: " + n.EventId + "  FinishIgt " + n.FinishIgt + "  IgtTotal " + vars.Run.IgtTotal + "  EventsDone " + vars.Run.EventsDone
+                 + "  (stamp - RaceStamp " + (n.LapStamp - n.RaceStamp) + ", raw " + vars.RawFinishIgt(n) + ", gates " + n.GatesHit + ")");
+    });
+
+    // Retry: the event that just finished is the one we last booked as finished (step 5 refines this with LastAttemptFailed for Arcade% rules).
+    vars.IsRetry = (Func<dynamic, bool>)((n) => vars.Run.LastFinishedEventId != "" && vars.Run.LastFinishedEventId == n.EventId && vars.Run.LastAttemptFailed);
 
     // On FailEdge: Run.LastAttemptFailed = true (retries are allowed in Arcade% / NG+ Sebulba%).          LEAD   TODO(step5)
     vars.OnRaceFailed = (Action<dynamic, dynamic>)((p, n) => { });
 
     //=================================================================================================================================================================================================
     // 5. PROFILES  (REFACTOR.md "Category profiles", "Start States", "End States", "Reset / ignore states")
-    // One record per category. Fields: Name, Start(p,n), IsEnd(p,n), SplitOnLap, SplitOnRace, ResetPolicy ("IL" | "Multi"), RankedBy, ExpectedEventKind (Debug only).
+    // One record per category. Fields: Name, Start(p,n), StartStamp ("Lap" | "Race" | "None": which dead stamp guards the start, BUGS.md #2),
+    // IsEnd(p,n), SplitOnLap, SplitOnRace, ResetPolicy ("IL" | "Multi"), RankedBy, ExpectedEventKind (Debug only).
     // S1..S6 / E1..E5 / R1..R7 are the catalogue numbers in REFACTOR.md.
     //=================================================================================================================================================================================================
-    vars.MakeProfile = (Func<string, string, Func<dynamic, dynamic, bool>, Func<dynamic, dynamic, bool>, bool, bool, string, string, dynamic>)
-        ((name, rankedBy, start, isEnd, splitOnLap, splitOnRace, resetPolicy, expectedKind) =>
+    vars.MakeProfile = (Func<string, string, Func<dynamic, dynamic, bool>, string, Func<dynamic, dynamic, bool>, bool, bool, string, string, dynamic>)
+        ((name, rankedBy, start, startStamp, isEnd, splitOnLap, splitOnRace, resetPolicy, expectedKind) =>
     {
         dynamic pr = new System.Dynamic.ExpandoObject();
-        pr.Name = name; pr.RankedBy = rankedBy; pr.Start = start; pr.IsEnd = isEnd;
+        pr.Name = name; pr.RankedBy = rankedBy; pr.Start = start; pr.StartStamp = startStamp; pr.IsEnd = isEnd;
         pr.SplitOnLap = splitOnLap; pr.SplitOnRace = splitOnRace; pr.ResetPolicy = resetPolicy; pr.ExpectedEventKind = expectedKind;
         return pr;
     });
@@ -510,19 +553,19 @@ init
     Func<dynamic, dynamic, bool> E4_SebulbaFinal    = (p, n) => vars.FinishEdge(p, n) && vars.IsEvent(n, vars.EVENT_SEBULBA_FINAL);          // LEAD M6   (sanity: CampaignAct == ACT_I)
     Func<dynamic, dynamic, bool> E5_KestarFinal     = (p, n) => vars.FinishEdge(p, n) && vars.IsEvent(n, vars.EVENT_KESTAR_FINAL);           // LEAD M6   (sanity: CampaignAct == ACT_III)
 
-    //--- The table (REFACTOR.md "Category profiles").           Name                         RankedBy  Start               IsEnd                 Lap    Race   Reset    ExpectedEventKind
+    //--- The table (REFACTOR.md "Category profiles").           Name                         RankedBy  Start               Stamp   IsEnd                 Lap    Race   Reset    ExpectedEventKind
     vars.Profiles = new Dictionary<string, dynamic>();
-    vars.Profiles["Cat_TimeTrial"]    = vars.MakeProfile("Arcade — Time Trial",        "IGT",    S1_FirstCrossing,   E1_SingleFinish,      true,  false, "IL",    "TimeTrial");
-    vars.Profiles["Cat_Precision"]    = vars.MakeProfile("Arcade — Precision Driving", "IGT",    S1_FirstCrossing,   E1_SingleFinish,      true,  false, "IL",    "Precision");
-    vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Tales of Podracing",         "IGT",    S2_GridGo,          E1_SingleFinish,      true,  false, "IL",    "Podracing");
-    vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "RTA",    S6_ScenarioStart,   E2_LastScenarioRace,  false, true,  "Multi", "Scenario");
-    vars.Profiles["Cat_ArcadePct"]    = vars.MakeProfile("Arcade%",                    "RTA",    S5_ArcadeStart,     E3_ExperimentBronze,  false, true,  "Multi", "");
-    vars.Profiles["Cat_SebulbaPct"]   = vars.MakeProfile("Sebulba%",                   "RTA",    S3_Prologue,        E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
-    vars.Profiles["Cat_AnyPct"]       = vars.MakeProfile("Any%",                       "RTA",    S3_Prologue,        E5_KestarFinal,       false, true,  "Multi", "Campaign");
-    vars.Profiles["Cat_NGSebulbaPct"] = vars.MakeProfile("NG+ Sebulba%",               "RTA",    S3_Prologue,        E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
-    vars.Profiles["Cat_NGAnyPct"]     = vars.MakeProfile("NG+ Any%",                   "RTA",    S3_Prologue,        E5_KestarFinal,       false, true,  "Multi", "Campaign");
-    vars.Profiles["Cat_NGChampion"]   = vars.MakeProfile("NG+ Champion%",              "RTA",    S3_Prologue,        E5_KestarFinal,       false, true,  "Multi", "Campaign");
-    vars.Profiles["Cat_NGActIII"]     = vars.MakeProfile("NG+ Act III",                "RTA",    S4_ActIIIStartRun,  E5_KestarFinal,       false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_TimeTrial"]    = vars.MakeProfile("Arcade — Time Trial",        "IGT",    S1_FirstCrossing,   "Lap",  E1_SingleFinish,      true,  false, "IL",    "TimeTrial");
+    vars.Profiles["Cat_Precision"]    = vars.MakeProfile("Arcade — Precision Driving", "IGT",    S1_FirstCrossing,   "Lap",  E1_SingleFinish,      true,  false, "IL",    "Precision");
+    vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Tales of Podracing",         "IGT",    S2_GridGo,          "Race", E1_SingleFinish,      true,  false, "IL",    "Podracing");
+    vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "RTA",    S6_ScenarioStart,   "None", E2_LastScenarioRace,  false, true,  "Multi", "Scenario");
+    vars.Profiles["Cat_ArcadePct"]    = vars.MakeProfile("Arcade%",                    "RTA",    S5_ArcadeStart,     "None", E3_ExperimentBronze,  false, true,  "Multi", "");
+    vars.Profiles["Cat_SebulbaPct"]   = vars.MakeProfile("Sebulba%",                   "RTA",    S3_Prologue,        "None", E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_AnyPct"]       = vars.MakeProfile("Any%",                       "RTA",    S3_Prologue,        "None", E5_KestarFinal,       false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_NGSebulbaPct"] = vars.MakeProfile("NG+ Sebulba%",               "RTA",    S3_Prologue,        "None", E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_NGAnyPct"]     = vars.MakeProfile("NG+ Any%",                   "RTA",    S3_Prologue,        "None", E5_KestarFinal,       false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_NGChampion"]   = vars.MakeProfile("NG+ Champion%",              "RTA",    S3_Prologue,        "None", E5_KestarFinal,       false, true,  "Multi", "Campaign");
+    vars.Profiles["Cat_NGActIII"]     = vars.MakeProfile("NG+ Act III",                "RTA",    S4_ActIIIStartRun,  "None", E5_KestarFinal,       false, true,  "Multi", "Campaign");
 
     // First ticked category wins. Returns true if the profile changed — this is REFACTOR.md's CategoryChanged edge (R6: reset run state, not the timer).
     vars.SelectProfile = (Func<bool>)(() =>
@@ -556,24 +599,29 @@ update
     vars.SelectProfile();                       // R6: category changed -> ResetRun (keeps the timer)
 
     // Bookkeeping, in this order (REFACTOR.md "Run bookkeeping").
+    string phaseBefore = vars.Run.Phase;
     vars.CaptureDeadStamps(p, n);               // every teardown, regardless of reset policy (BUGS.md #2 happens between Scenario races too)
-    // TODO(step3): if (vars.RaceEnteredEdge(p, n))  vars.OnRaceEntered(p, n);
-    // TODO(step5): if (vars.FailEdge(p, n))         vars.OnRaceFailed(p, n);
-    // TODO(step3): if (vars.FinishEdge(p, n) && !n.Failed && !retry) vars.OnRaceFinished(p, n);
-    // TODO(step3): project Run.Phase from n.Flow unless Phase is "Armed" or "Done" (REFACTOR.md "Run state").
+    if (vars.RaceEnteredEdge(p, n)) vars.OnRaceEntered(p, n);
+    // TODO(step5): if (vars.FailEdge(p, n))  vars.OnRaceFailed(p, n);
+    if (vars.FinishEdge(p, n) && n.FinishIgt >= 0 && !vars.IsRetry(n)) vars.OnRaceFinished(p, n);
     // TODO(step5): if (Run.Phase == "Idle" && Profile uses S5/S6 && vars.MenuDepartureEdge(p, n)) { Run.ArmedAt = DateTime.Now; Run.ArmedFrom = p.Flow; Run.Phase = "Armed"; }
     // TODO(step5): if (Run.Phase == "Armed" && vars.ArrivalWrongEdge(p, n, expected) && !settings["MenuStartTrust"]) { Run.Phase = "Idle"; }   (trust policy: reset{} R7 handles it)
+    // TODO(step5): project Run.Phase from n.Flow for the multi-event policy (REFACTOR.md "Run state"); for ILs the bookkeeping above is enough.
 
     // Debug: print raw edges (port of v0.4.1 update{}) and derived edges.
     if (settings["Debug"])
     {
         if (vars.FlowEdge(p, n))            vars.Log("flow " + p.Flow + " -> " + n.Flow + (n.flowRecordCount > 1 ? "  WARNING: " + n.flowRecordCount + " active state machines" : ""));
         if (n.raceStarted != p.raceStarted) vars.Log("raceStarted " + p.raceStarted + " -> " + n.raceStarted + "  (RaceStamp " + n.RaceStamp + ")");
-        if (n.playerLap   != p.playerLap)   vars.Log("playerLap "   + p.playerLap   + " -> " + n.playerLap + "  hudLap " + n.hudLap + "  totalLaps " + n.totalLaps + "  LapStamp " + n.LapStamp);
+        if (n.playerLap   != p.playerLap)   vars.Log("playerLap "   + p.playerLap   + " -> " + n.playerLap + "  hudLap " + n.hudLap + "  totalLaps " + n.totalLaps
+                                                     + "  LapStamp " + p.LapStamp + " -> " + n.LapStamp + "  (lap time " + (n.LapStamp - p.LapStamp) + ")");
         if (n.finished    != p.finished)    vars.Log("finished "    + p.finished    + " -> " + n.finished + "  finishTime " + n.finishTime + "  bonusTime " + n.bonusTime);
         if (n.HudVmPresent != p.HudVmPresent) vars.Log("hudVM " + (n.HudVmPresent ? "defined" : "undefined"));
-        if (n.InRace != p.InRace)           vars.Log("InRace " + p.InRace + " -> " + n.InRace);
-        // TODO(step3+): EventId / MapId / Phase / EventsDone / IgtTotal changes; EventKind vs Profile.ExpectedEventKind mismatch warning.
+        if (n.InRace != p.InRace)           vars.Log("InRace " + p.InRace + " -> " + n.InRace + "  (flow " + n.Flow + ", IsRaceGameState " + vars.IsRaceGameState(n) + ")");
+        if (n.EventId != p.EventId)         vars.Log("EventId '" + p.EventId + "' -> '" + n.EventId + "'  stage " + n.StageIndex + "/" + n.StageCount);
+        if (n.Failed && !p.Failed)          vars.Log("Failed: wrecked " + n.wrecked + "  eliminated " + n.eliminated + "  failReasons " + n.failReasons);
+        if (vars.Run.Phase != phaseBefore)  vars.Log("phase " + phaseBefore + " -> " + vars.Run.Phase);
+        // TODO(optional): EventKind vs Profile.ExpectedEventKind mismatch warning.
     }
 }
 
@@ -582,10 +630,14 @@ update
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 isLoading
 {
-    // TODO(step2): port v0.4.1 — return vars.Now.Finished;   (freeze after the finish so the gameTime{} value stays exact)
-    // TODO(step3): return !vars.Now.InRace || vars.Now.Finished;   (multi-race: Game Time stops between races)
-    // TODO(step8): || (settings["PauseStopsTimer"] && vars.Now.Paused)
-    return false;
+    dynamic n = vars.Now, run = vars.Run;
+    // IL (v0.4.1, verbatim): freeze after the finish so the value set in gameTime{} stays exact.
+    // Multi-event: also freeze whenever we are not in a live race, so Game Time stops between races (the IGT-sum column).
+    //   NOT applied to ILs on purpose: in Arcade the HUD VM can appear a tick after the start crossing, and a one-tick freeze there would be a behaviour change.
+    bool loading = n.Finished;
+    if (run.Profile != null && run.Profile.ResetPolicy == "Multi" && !n.InRace) loading = true;
+    // TODO(step8): if (settings["PauseStopsTimer"] && n.Paused) loading = true;
+    return loading;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -593,13 +645,31 @@ isLoading
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 gameTime
 {
-    dynamic p = vars.Prev, n = vars.Now;
+    dynamic p = vars.Prev, n = vars.Now, run = vars.Run;
 
-    // TODO(step2): finish tick — port v0.4.1: if (vars.FinishEdge(p, n) && n.FinishIgt >= 0) return TimeSpan.FromSeconds(vars.Run.IgtTotal + n.FinishIgt);
-    //              (Run.IgtTotal is 0 for ILs; OnRaceFinished has already added this race for multi-race profiles — don't double count. Decide which side owns the add.)
-    // TODO(step2): lap edge — port v0.4.1: on vars.LapEdge(p, n) with a moved LapStamp, return IgtTotal + LapSplitIgt(n) if within 0.5 s of the running Game Time (garbage guard).
+    // Finish tick (v0.4.1): Game Time snaps to EventFinishTime — the difference of the game's LapStartServerTime stamps at the start and finish
+    // crossings, so it matches the results screen and carries none of our polling latency (BUGS.md #1). OnRaceFinished (update{}) has already
+    // added FinishIgt to Run.IgtTotal, so return the total: IgtTotal == FinishIgt for ILs, the run's IGT sum for multi-event categories.
+    if (vars.FinishEdge(p, n) && n.FinishIgt >= 0)
+    {
+        vars.Log("finish: finishTime " + n.FinishIgt + "  stamp - RaceStamp " + (n.LapStamp - n.RaceStamp) + "  Game Time -> " + run.IgtTotal);
+        return TimeSpan.FromSeconds(run.IgtTotal);
+    }
+
+    // Lap crossings (v0.4.1): the game stamps LapStartServerTime at the crossing, so stamp - RaceStartTime is the exact elapsed race time
+    // (RaceStartTime = first-crossing stamp in Arcade, countdown end in grid events). Re-syncs the live Game Time and makes the lap split exact.
+    // Only on a tick where the stamp actually moved, and only if within 0.5 s of the running Game Time (garbage guard).
+    if (vars.LapEdge(p, n) && n.LapStamp != p.LapStamp)
+    {
+        double lapElapsed = run.IgtTotal + vars.LapSplitIgt(n);
+        double running = timer.CurrentTime.GameTime.HasValue ? timer.CurrentTime.GameTime.Value.TotalSeconds : -1;
+        vars.Log("lap edge: IgtTotal + (stamp - RaceStamp) " + lapElapsed + "  running Game Time " + running + "  correction " + (lapElapsed - running));
+        if (vars.LapSplitIgt(n) > 0 && Math.Abs(lapElapsed - running) < 0.5)
+            return TimeSpan.FromSeconds(lapElapsed);
+    }
+
     // TODO(step8): live — return TimeSpan.FromSeconds(vars.RunGameTime(n)) every tick, if hudEventTime proves smooth at 60 Hz (BUGS.md #1 live jitter).
-    return null;   // fall back to real time (v0.4.1 behaviour between crossings)
+    return null;   // real time between crossings (v0.4.1 behaviour)
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -611,17 +681,21 @@ start
     if (run.Profile == null) return false;
 
     // Shared guards:
-    //   - run.Phase == "Idle"                      (a run in progress never re-starts; R5 handles "runner restarted the category")
-    //   - vars.NewRaceInstance(p, n) for race-value starts (S1, S2) — rejects the torn-down race's replayed memory (BUGS.md #2)
-    //   - flow-edge starts (S3, S4, and S5/S6 under MenuStartTrust) fire outside a race and need no race-value guard.
-    //   - S5/S6 under the default (backdated) policy fire while run.Phase == "Armed", on the confirming tick; the Phase guard below must allow that.
-    // TODO(step2): if (run.Phase != "Idle" && !(run.Phase == "Armed" && !settings["MenuStartTrust"])) return false;
-    // TODO(step2): bool fired = run.Profile.Start(p, n);
-    // TODO(step5): if (fired && run.Phase == "Armed") timer.Run.Offset = -(DateTime.Now - run.ArmedAt);   // backdate to the press (set in start{} — onStart fires after the timer is already running)
-    // TODO(step2): if (fired && run.Profile.ResetPolicy == "IL" && !vars.NewRaceInstance(p, n)) { vars.Log("start rejected: torn-down race stamps"); return false; }
-    // TODO(step2): if (fired) vars.Log("START (" + run.Profile.Name + ")");
-    // TODO(step2): return fired;
-    return false;
+    //   - run.Phase == "Idle"                      (a run in progress never re-starts; R5 handles "runner restarted the category").
+    //     onReset puts Phase back to Idle, so this is a no-op for ILs: LiveSplit ignores start{} while the timer runs anyway.
+    //   - vars.NewRaceInstance(p, n, StartStamp) for race-value starts (S1 "Lap", S2 "Race") — rejects the torn-down race's replayed memory (BUGS.md #2).
+    //   - flow-edge starts ("None") fire outside a race and need no race-value guard.
+    //   - S5/S6 under the default (backdated) policy fire while run.Phase == "Armed", on the confirming tick; the Phase guard allows that.
+    if (run.Phase != "Idle" && !(run.Phase == "Armed" && !settings["MenuStartTrust"])) return false;
+    if (!run.Profile.Start(p, n)) return false;
+    if (!vars.NewRaceInstance(p, n, run.Profile.StartStamp))
+    {
+        vars.Log("start rejected: " + run.Profile.StartStamp + " stamp " + (run.Profile.StartStamp == "Lap" ? n.LapStamp : n.RaceStamp) + " is the torn-down race's");
+        return false;
+    }
+    // TODO(step5): if (run.Phase == "Armed") timer.Run.Offset = -(DateTime.Now - run.ArmedAt);   // backdate to the press (here, not in onStart: the timer is already running there)
+    vars.Log("START (" + run.Profile.Name + ")  " + n.EventId + "  RaceStamp " + n.RaceStamp + "  LapStamp " + n.LapStamp + "  flow " + n.Flow);
+    return true;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -631,16 +705,16 @@ split
 {
     dynamic p = vars.Prev, n = vars.Now, run = vars.Run;
     if (run.Profile == null) return false;
-    // TODO(step2): if (!n.InRace) return false;   (v0.4.1 gate; revisit for multi-race, where the FinishEdge tick is still in-race)
+    if (!n.InRace) return false;   // v0.4.1 gate. The FinishEdge tick is still in-race for multi-event categories too.
 
     // E#: the run is over.
-    // TODO(step2): if (run.Profile.IsEnd(p, n)) { run.Phase = "Done"; return settings["FinishSplit"]; }
+    if (run.Profile.IsEnd(p, n)) { run.Phase = "Done"; vars.Log("END (" + run.Profile.Name + ")  IgtTotal " + run.IgtTotal); return settings["FinishSplit"]; }
 
     // Race / event split: a finish that isn't the end. Not on a failed attempt or a retry of LastFinishedEventId.
-    // TODO(step3): if (run.Profile.SplitOnRace && vars.FinishEdge(p, n) && !n.Failed && !retry) return settings["RaceSplits"];
+    if (run.Profile.SplitOnRace && vars.FinishEdge(p, n) && !n.Failed && !vars.IsRetry(n)) return settings["RaceSplits"];
 
-    // Lap split: lap k -> k+1 for 1 <= k < totalLaps (0 -> 1 is the start crossing; totalLaps -> totalLaps+1 is the finish).
-    // TODO(step2): if (run.Profile.SplitOnLap && settings["LapSplits"] && vars.LapEdge(p, n)) return true;
+    // Lap split: lap k -> k+1 for 1 <= k < totalLaps (0 -> 1 is the start crossing; totalLaps -> totalLaps+1 is the finish, handled above).
+    if (run.Profile.SplitOnLap && settings["LapSplits"] && vars.LapEdge(p, n)) return true;
 
     return false;
 }
@@ -655,11 +729,12 @@ reset
 
     if (run.Profile.ResetPolicy == "IL")
     {
-        // R1: teardown before the finish -> reset (if enabled). R2: after the finish -> no-op. R3: FailEdge -> reset (if enabled).
-        // TODO(step2): port v0.4.1 — if (!settings["ResetOnLeave"]) return false;
-        // TODO(step2):   if (vars.IsTearingDown(p, n) && !p.Finished) return true;
-        // TODO(step2):   if (p.raceStarted != 0 && n.raceStarted == 0 && !p.Finished) return true;   (restart in place)
-        // TODO(step5):   if (vars.FailEdge(p, n)) return true;
+        // R1 / R2: v0.4.1 reset conditions, verbatim. (The flow-based IsTearingDown is deliberately not used here yet — step 1–4 keep IL behaviour identical.)
+        if (!settings["ResetOnLeave"]) return false;
+        if (p.HudVmPresent && !n.HudVmPresent)                      { vars.Log("RESET: HUD VM gone");                 return true; }   // player left the race
+        if (p.raceStarted == 1 && n.raceStarted == 0)               { vars.Log("RESET: raceStarted 1 -> 0");          return true; }   // race restarted in place
+        if (p.playerLap >= 1 && n.playerLap == 0 && !n.Finished)    { vars.Log("RESET: playerLap " + p.playerLap + " -> 0"); return true; }   // covers Arcade restarts, where bIsRaceStarted may never be set
+        // TODO(step5): R3 — if (vars.FailEdge(p, n)) return true;
         return false;
     }
     else // "Multi"
@@ -679,13 +754,21 @@ reset
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 onStart
 {
-    // TODO(step3): vars.Run.Phase = (race-value start) ? "InRace" : "Armed";  IgtTotal = 0; EventsDone = 0;   (Phase is then projected from Flow each tick)
-    vars.Log("timer started" + (vars.Run.Phase == "Armed" ? " (armed from " + vars.Run.ArmedFrom + " at " + vars.Run.ArmedAt.ToString("HH:mm:ss.fff") + ")" : ""));
+    // Fires for script starts AND manual starts. A fresh run: zero the totals. Race-value starts (S1/S2) are already in the race; flow-edge starts
+    // are Armed until OnRaceEntered books the first race. If the runner started the timer by hand mid-race, treat it as InRace when we can see one.
+    dynamic run = vars.Run;
+    run.IgtTotal = 0.0; run.EventsDone = 0; run.LastFinishedEventId = ""; run.LastAttemptFailed = false;
+    bool raceValueStart = run.Profile != null && run.Profile.StartStamp != "None";
+    if (run.Phase != "Armed") run.Phase = (raceValueStart || vars.Now.InRace) ? "InRace" : "Armed";
+    vars.Log("timer started  phase " + run.Phase + (run.Phase == "Armed" && run.ArmedFrom != "" ? " (armed from " + run.ArmedFrom + " at " + run.ArmedAt.ToString("HH:mm:ss.fff") + ")" : ""));
 }
 
 onReset
 {
     // Timer reset by the script or the runner: clear run state but keep the profile and the dead-race stamps (they belong to memory, not the run).
-    // TODO(step3): dynamic keep = vars.Run.Profile; double dr = vars.Run.DeadRaceStamp, dl = vars.Run.DeadLapStamp; vars.ResetRun(); vars.Run.Profile = keep; ...
-    vars.Log("timer reset");
+    dynamic keep = vars.Run.Profile;
+    double deadRace = vars.Run.DeadRaceStamp, deadLap = vars.Run.DeadLapStamp, lastRace = vars.Run.LastRaceStamp;
+    vars.ResetRun();
+    vars.Run.Profile = keep; vars.Run.DeadRaceStamp = deadRace; vars.Run.DeadLapStamp = deadLap; vars.Run.LastRaceStamp = lastRace;
+    vars.Log("timer reset  (phase Idle; dead stamps kept: race " + deadRace + ", lap " + deadLap + ")");
 }

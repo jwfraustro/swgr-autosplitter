@@ -7,6 +7,10 @@ LiveSplit autosplitter for speedrunning Star Wars: Galactic Racer.
 `SWGR_Autosplitter.asl` — v0.4.1, single races (IL). Offsets are hard-coded for the
 current build (`GWorld` = exe+0xADFF928) and will break when the game patches.
 
+`SWGR_Autosplitter_Refactor.asl` — 0.5.0-dev, the category-based rewrite (see `REFACTOR.md`).
+The three IL categories are implemented and meant to match v0.4.1; **not yet tested in
+LiveSplit**. Multi-event categories are stubs. Keep using v0.4.1 until it is.
+
 ## Installation (manual)
 
 In LiveSplit: Edit Layout → `+` → Control → Scriptable Auto Splitter, then point it at

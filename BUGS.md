@@ -83,7 +83,8 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
 - **Cause:** v0.4.1 `vars.LapsSane` requires `totalLaps < 100`, so `InRace` is false for the
   whole event. Lap splits, the Race start and leave-race resets won't fire there.
 - **Matters for:** campaign categories (Sebulba%, Any%, NG+), not the arcade ILs.
-- **Fix (planned, refactor):** bound becomes `0 < totalLaps <= 100` (`SWGR_Autosplitter_Refactor.asl`
-  `LapsSane` TODO). Still to check in-game: whether `bHasFinishedEvent` flips when the player is
-  in the top 3 at the end, how `playerLap` behaves, and whether lap splits make sense there.
-- **Status:** open.
+- **Fix (refactor, 2026-10-19):** bound is `0 < totalLaps <= 100` in `SWGR_Autosplitter_Refactor.asl`
+  (`Snapshot` → `LapsSane`). v0.4.1 keeps the old bound. Still to check in-game: whether
+  `bHasFinishedEvent` flips when the player is in the top 3 at the end, how `playerLap` behaves,
+  and whether lap splits make sense there.
+- **Status:** fixed in the refactor script, untested; open in v0.4.1.
