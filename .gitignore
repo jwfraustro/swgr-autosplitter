@@ -20,3 +20,6 @@ desktop.ini
 *.ptr.results.*
 *.scandata
 *.scandata.addresslist
+
+# testing
+*.env
