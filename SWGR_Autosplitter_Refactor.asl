@@ -120,8 +120,8 @@ startup
         settings.SetToolTip("Cat_TimeTrial",    "Single Arcade time trial (rolling start). Starts on the first start-line crossing; ends on the final-lap finish. Game Time = in-game time.");
     settings.Add("Cat_Precision",    false, "Arcade — Precision Driving", "Category");
         settings.SetToolTip("Cat_Precision",    "Single Precision Driving event. As Time Trial; Game Time already includes the 1.5 s gate deductions.");
-    settings.Add("Cat_Podracing",    false, "Tales of Podracing",         "Category");
-        settings.SetToolTip("Cat_Podracing",    "Single podracer race (grid start). Starts when the countdown ends; ends on the final-lap finish.");
+    // settings.Add("Cat_Podracing",    false, "Tales of Podracing",         "Category");
+    //     settings.SetToolTip("Cat_Podracing",    "Single podracer race (grid start). Starts when the countdown ends; ends on the final-lap finish.");
     settings.Add("Cat_Scenarios",    false, "Arcade Scenarios",           "Category");
         settings.SetToolTip("Cat_Scenarios",    "5 races in sequence. RTA. Starts on the scenario start (TBD); splits per race; ends on the 5th race's finish. Does not reset between races.");
     settings.Add("Cat_ArcadePct",    false, "Arcade%",                    "Category");
@@ -163,7 +163,7 @@ startup
 
     // Category setting ids in display order. First ticked one wins (see vars.SelectProfile).
     vars.CategoryIds = new List<string> {
-        "Cat_TimeTrial", "Cat_Precision", "Cat_Podracing", "Cat_Scenarios", "Cat_ArcadePct",
+        "Cat_TimeTrial", "Cat_Precision", /*"Cat_Podracing",*/ "Cat_Scenarios", "Cat_ArcadePct",
         "Cat_SebulbaPct", "Cat_AnyPct", "Cat_NGSebulbaPct", "Cat_NGAnyPct", "Cat_NGChampion", "Cat_NGActIII"
     };
 
@@ -557,7 +557,7 @@ init
     vars.Profiles = new Dictionary<string, dynamic>();
     vars.Profiles["Cat_TimeTrial"]    = vars.MakeProfile("Arcade — Time Trial",        "IGT",    S1_FirstCrossing,   "Lap",  E1_SingleFinish,      true,  false, "IL",    "TimeTrial");
     vars.Profiles["Cat_Precision"]    = vars.MakeProfile("Arcade — Precision Driving", "IGT",    S1_FirstCrossing,   "Lap",  E1_SingleFinish,      true,  false, "IL",    "Precision");
-    vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Tales of Podracing",         "IGT",    S2_GridGo,          "Race", E1_SingleFinish,      true,  false, "IL",    "Podracing");
+    // vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Tales of Podracing",         "IGT",    S2_GridGo,          "Race", E1_SingleFinish,      true,  false, "IL",    "Podracing");
     vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "RTA",    S6_ScenarioStart,   "None", E2_LastScenarioRace,  false, true,  "Multi", "Scenario");
     vars.Profiles["Cat_ArcadePct"]    = vars.MakeProfile("Arcade%",                    "RTA",    S5_ArcadeStart,     "None", E3_ExperimentBronze,  false, true,  "Multi", "");
     vars.Profiles["Cat_SebulbaPct"]   = vars.MakeProfile("Sebulba%",                   "RTA",    S3_Prologue,        "None", E4_SebulbaFinal,      false, true,  "Multi", "Campaign");
