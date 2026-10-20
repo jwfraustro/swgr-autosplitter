@@ -446,17 +446,16 @@ Each step keeps the script shippable; ILs must not regress.
    Steps 1–4 landed 2026-10-19 in `SWGR_Autosplitter_Refactor.asl` (0.5.0-dev), **untested in
    LiveSplit**. Intended differences from v0.4.1, and nothing else: `LapsSane` accepts 100 laps
    (BUGS.md #3); with ResetOnLeave off and a running timer reused across races, Game Time is the
-   IGT *sum* rather than the last race's time. The script still carries the latch-and-confirm
-   scaffolding from the earlier plan (`ArmedAt` / `ArmedFrom`, `MenuStartTrust`, the `Armed` /
-   `InRace` / `Between` phases, the `ArrivalConfirmEdge` / `ArrivalWrongEdge` stubs); step 5
-   removes it.
-5. Run-length family, Arcade% first — it can be tested by finishing Landspeeder Ace and
-   skipping to The Experiment: `MenuLeaveEdge`, `PaddockNarrative` in `InMenu`, the dedupe in
-   `OnRaceFinished`, `SplitOnRace`, `Family`-driven reset (none) and `isLoading`, `Phase`
-   collapsed to Idle / Running / Done, E3 by `stageName`. Needs the internal name of The
-   Experiment. Scenarios (E2) come with it once `IsLastStage` is wired. Mostly deletion.
-6. Campaign categories: S3 is already there; E4 / E5 need the Sebulba and Kestar final
-   `stageName`s. NG+ Act III: S4 once the `Paddock.2 → 4` sequence is recorded.
+   IGT *sum* rather than the last race's time.
+5. ✅ Run-length family (2026-10-20, **untested**): `MenuLeaveEdge`, `PaddockNarrative` in
+   `InMenu`, the redo dedupe in `OnRaceFinished` (`Run.FinishIsRepeat`, read by `split{}` on the
+   same tick), `Family`-driven reset (none) and `isLoading`, `Phase` collapsed to Idle / Running /
+   Done, E2 by `IsLastStage`, E3 by The Experiment's `stageName`. The latch-and-confirm
+   scaffolding, `MenuStartTrust`, `MedalBeaten`, `OnRaceFailed` / `IsRetry` and the campaign
+   stubs are gone. S4 (`ActIIIStartRunEdge`) is wired too, pending the 2→3→4 vs 2→4 recording.
+   Test first on Arcade%: Landspeeder Ace, then skip to The Experiment.
+6. Campaign ends: E4 / E5 need the Sebulba and Kestar final `stageName`s; until then those
+   profiles start and split but never end (an empty name never matches).
 7. Separately: `IsPaused`, live `EventIgt` as the in-race Game Time, versioned `state` blocks.
    Only if asked: medal check on E3 (M8), per-planet campaign splits.
 

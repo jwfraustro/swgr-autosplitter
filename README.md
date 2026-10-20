@@ -8,8 +8,10 @@ LiveSplit autosplitter for speedrunning Star Wars: Galactic Racer.
 current build (`GWorld` = exe+0xADFF928) and will break when the game patches.
 
 `SWGR_Autosplitter_Refactor.asl` — 0.5.0-dev, the category-based rewrite (see `REFACTOR.md`).
-The three IL categories are implemented and meant to match v0.4.1; **not yet tested in
-LiveSplit**. Multi-event categories are stubs. Keep using v0.4.1 until it is.
+IL categories (Time Trial, Precision) are meant to match v0.4.1. Run-length categories start
+the timer when you leave the menu, split once per finished event and never auto-reset;
+Arcade% and Scenarios have their end conditions, the campaign categories still need the final
+events' names. **Nothing in it is tested in LiveSplit yet.** Keep using v0.4.1 until it is.
 
 ## Installation (manual)
 
