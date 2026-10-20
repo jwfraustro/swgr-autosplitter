@@ -88,3 +88,7 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
   `bHasFinishedEvent` flips when the player is in the top 3 at the end, how `playerLap` behaves,
   and whether lap splits make sense there.
 - **Status:** fixed in the refactor script, untested; open in v0.4.1.
+
+# 4. Arcade%
+
+- **Seen:** start when loading Super Surge, which might have the same track id as Landspeeder Ace. Not huge since it should have already started by the time the person reaches it
