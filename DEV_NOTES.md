@@ -61,7 +61,7 @@ RTA tracked alongside.
 | **NG+ Sebulba%** | RTA | **"Accept"** on the campaign-reset *"Are you sure?"* dialog | final-lap finish vs Sebulba |
 | **NG+ Any%** | RTA | reset-campaign **"Accept"** | final-lap finish vs Kestar's Podracer |
 | **NG+ Champion%** (Champion difficulty) | RTA | reset-campaign **"Accept"** | final-lap finish vs Kestar's Podracer |
-| **NG+ Act III** | RTA | **"Continue"** on the Act III loadout check (after *Star Run* → Racer Style and Favors) | final-lap finish vs Kestar's Podracer |
+| **NG+ Act III** | RTA | **"Continue"** on the Act III loadout check (after *Start Run* → Racer Style and Favors) | final-lap finish vs Kestar's Podracer |
 
 That gives **5 start triggers**: New Campaign, reset Accept, Act III loadout Continue, Arcade
 "Start Event", and Scenario start. There are **4 end triggers**, all on the existing final-lap
@@ -282,17 +282,40 @@ Notes:
   should be "entered `Racing`", not "left `Countdown`".
 - `RollingRestart` (24) and `IntermissionPhase` (23) exist (knockout / multi-stage events).
 
-Where the current state lives:
-- `UGameFlowStateMachineComponent` (component; owner not yet known — added at runtime)
-  - `+0x00C0 TArray<FGameFlowStateRecord> ActiveStateMachines`
+Where the current state lives — **verified (2026-10-19)**:
+- The `UGameFlowStateMachineComponent` is owned by the **game state**, added in its Blueprint
+  (no typed C++ member anywhere in the dump), so it is reached through
+  `AActor.BlueprintCreatedComponents` (`+0x298`, `TArray<UActorComponent*>`), element 0:
+
+  | | Chain |
+  |---|---|
+  | component | `"SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0` |
+  | `CurrentStateId` (record 0) | `…, 0x1B0, 0x298, 0x0, 0xC0, 0x10` (int) |
+  | machine identity: `StateMachineStateIdEnum->Names.Num` | `…, 0x1B0, 0x298, 0x0, 0xC0, 0x8, 0x50` (int) |
+
+  Record *n* is at `0xC0 → + n*0x28`; record count at component `+0xC8`.
+- **Every game state carries this component**, not just `ARacingGameState`: outside a race the
+  game state is a FrontEnd / Paddock flow state and the record holds that machine instead.
+  `CurrentStateId` is therefore ambiguous on its own (Paddock `Leaving` = 5 = race `Racing`).
+  The enum's entry count disambiguates: `ESimpleRaceGameModeState` **37**, `EFrontEndFlowState`
+  **16**, `EPvpFlowState` ≥14, `EPaddockFlowState` **9**, `EPaddockNarrativeFlowState` **4**.
+- `UGameFlowStateMachineComponent` `+0x00C0 TArray<FGameFlowStateRecord> ActiveStateMachines`
 - `FGameFlowStateRecord` (size 0x28)
-  - `+0x00 TSubclassOf<UGameFlowStateMachine> StateMachineClass` (want `USimpleRaceStateMachine`)
-  - `+0x08 UEnum* StateMachineStateIdEnum`
-  - `+0x10 int32 CurrentStateId` ← `ESimpleRaceGameModeState` value
+  - `+0x00 TSubclassOf<UGameFlowStateMachine> StateMachineClass`
+  - `+0x08 UEnum* StateMachineStateIdEnum` (`Names` TArray data at `+0x48`, count at `+0x50`)
+  - `+0x10 int32 CurrentStateId`
+  - `+0x14 bool IsNew`
   - `+0x18 double CurrentStateDuration`, `+0x20 double CurrentStateExpirationTime`
 - `ARacingGameMode` `+0x04F8 USimpleRaceStateMachine* StateMachine`, `+0x04C8 ARacingGameState* mRaceState`
   (game mode exists locally in singleplayer).
-- TODO: find which actor owns the `UGameFlowStateMachineComponent` (likely game state or game mode).
+- Still to check: element 0 is the GFSM component in all three game-state Blueprints; how many
+  records the paddock holds (narrative machine may ride alongside); the exact state sequences
+  on Arcade "Start Event" and on Act III "Start Run" (see `EPaddockFlowState` / `EFrontEndFlowState`
+  in `Griffin_enums.hpp`).
+- Consequence for the refactor: menu-press starts (S3–S6) and `Run.Phase` become flow-state
+  edges. NG+ Act III = `Paddock 2 CampaignSetup → 4 InWorld` (same machine, no load).
+  Arcade% / Scenarios = departure from `FrontEnd 1 PrimaryModeSelect`, latched through the
+  load (chain reads 0), confirmed by `stageName` once the race machine appears.
 
 ## ARacingGameState (size ≥ 0x428)
 
@@ -418,7 +441,7 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 
 ## Open questions / to verify in-game
 
-- [ ] Which actor owns `UGameFlowStateMachineComponent`; confirm `CurrentStateId` tracks the enum above.
+- [x] Which actor owns `UGameFlowStateMachineComponent`: the game state, via `BlueprintCreatedComponents[0]` (`GWorld, 0x1B0, 0x298, 0x0`). Enum count at `…, 0xC0, 0x8, 0x50` identifies the machine.
 - [x] `CurrentLapNumber` is 0 until the first line crossing (HUD counter starts at 1).
 - [x] `CurrentLapNumber` ticks on the final crossing too: ends at LapCount+1.
 - [x] `bHasFinishedEvent` flips near-perfectly on the finish crossing (revisit if timing drift shows up).
@@ -429,7 +452,7 @@ Lives on `UVehicleState +0x0380` (same object `tools/vehicle_state_logger.py` re
 - [x] GWorld static address + GameState chains (RaceStartTime, bIsRaceStarted, LapCount) resolve live.
 - [x] Player race data and HUD VM chains resolve live.
 - [x] Track internal name chain (`GWorld, 0x1B0, 0x3D8, 0x28, 0x50`): resolves for Time Trial / Podracing, bad in Precision, map-only in campaign. Superseded by the `FRaceEventInstance.InternalName` chain.
-- [ ] Is the race state machine's `CurrentStateId` reachable by a fixed chain (component owner)?
+- [x] Is the race state machine's `CurrentStateId` reachable by a fixed chain: yes, `GWorld, 0x1B0, 0x298, 0x0, 0xC0, 0x10`.
 - [ ] Pause flag for an optional "pausing stops timer" setting.
 - [x] `EArcadeEventCategories` chain: correct chain is `…0x1B0, 0x3F8, 0x58, 0x321` (no `0x0`); reads Plane 2 live. Undefined in campaign.
 - [ ] Event `InternalName`s for Landspeeder Ace, The Experiment, and the Sebulba / Kestar finals.

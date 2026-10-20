@@ -54,10 +54,35 @@ ASL facts that shape the design:
 
 ### Raw readings (`state{}`)
 
-Grouped by owning object. "Chain" refers to the chains in `NOTES.md`.
+Grouped by owning object. "Chain" refers to the chains in `DEV_NOTES.md`.
 
-**A. `ARacingGameState`** (`GWorld, 0x1B0`) — valid only during a race; otherwise the same
-offsets point into a menu GameState and read garbage.
+**A0. Flow state machine** (`GWorld, 0x1B0, 0x298, 0x0` = GameState → `BlueprintCreatedComponents[0]`
+= `UGameFlowStateMachineComponent`). **Every** GameState carries this component — in a race it runs
+`USimpleRaceStateMachine`, in the menus `UFrontEndStateMachine`, in the campaign hub `UPaddockStateMachine`.
+It is the game's own phase machine, and the one reading that is meaningful in every mode. The
+`CurrentStateId` int is ambiguous on its own (Paddock `Leaving` = 5 = race `Racing`), so it is always
+read together with the enum's entry count, which identifies the machine.
+
+| Reading | Field | Type | Status | Notes |
+|---|---|---|---|---|
+| `flowState` | `ActiveStateMachines[0].CurrentStateId` (`…0xC0, 0x10`) | int | verified | the state id in the machine's own enum |
+| `flowEnumCount` | `ActiveStateMachines[0].StateMachineStateIdEnum->Names.Num` (`…0xC0, 0x8, 0x50`) | int | verified | **37** `ESimpleRaceGameModeState`, **16** `EFrontEndFlowState`, **9** `EPaddockFlowState`, **4** `EPaddockNarrativeFlowState`, ≥14 `EPvpFlowState`; 0 = chain broken (loading) |
+| `flowRecordCount` | `ActiveStateMachines.Num` (`…0xC8`) | int | verified field | expect 1; if the paddock ever shows 2, record 0 may not be the one we want |
+| `primaryFlow` | `UGfnGameInstance.PrimaryFlow` (`GWorld, 0x228, 0x398`) | byte | lead | `EGfnPrimaryFlow`: Campaign 1, QuickRace 2, Arcade 3, Multiplayer 4. Cheap sanity gate per profile |
+
+State ids that matter (full enums in `Griffin_enums.hpp`):
+
+- `ESimpleRaceGameModeState` (37): LoadingPhase 1, WaitForLevelToLoad 10, WaitForClientsToBeReady 11,
+  PreRacePhase 12, IntroSequence 13, PrepareForEventStart 3, IgnitionSequence 17, RollingStart 18,
+  Countdown 4, **Racing 5**, IntermissionPhase 23, PostRacePhase 6, Outro 14, **Results 15**,
+  PrepareToLeave 30, **Leaving 8**, Invalid 255.
+- `EFrontEndFlowState` (16): Root 0, **PrimaryModeSelect 1**, LaunchingCampaign 2, QuickRaceSetup 3,
+  LaunchingQuickRace 4, Boot 11, PreLoadBoot 12.
+- `EPaddockFlowState` (9): Root 0, Intro 1, **CampaignSetup 2**, PreWorld 3, **InWorld 4**, Leaving 5,
+  WipeToBlackBeforeLeaving 6.
+
+**A. `ARacingGameState`** (`GWorld, 0x1B0`) — valid only while `FlowMachine == Race`; otherwise the
+same offsets point into a menu GameState and read garbage.
 
 | Reading | Field | Type | Status | Notes |
 |---|---|---|---|---|
@@ -68,7 +93,8 @@ offsets point into a menu GameState and read garbage.
 | `countdownEndTime` | CountdownEndTime | double | verified | server-time stamp on the `raceStartTime` clock (e.g. 1670.018), not a seconds-left counter; cross-check for grid starts |
 | `activeStage` | EventRecipeState.ActiveStage | int | verified | 0-indexed stage in the recipe (Scenarios?) |
 | `stageCount` | EventRecipe.EventStages.Num | int | verified | TArray count at `0x3F8 + 0x8` |
-| `raceFlowState` | state machine CurrentStateId | int | find | `UGameFlowStateMachineComponent` owner unknown; would give `Racing` / `Results` / `Leaving` directly |
+
+(`raceFlowState` moved to A0 as `flowState` — it is not specific to the race GameState.)
 
 **B. `URaceEventVM`** (HUD view model, `GWorld, 0x1B0, 0x3D8`) — pointer is 0 outside a race.
 
@@ -120,13 +146,12 @@ after the data pointer (the earlier `…0x3F8, 0x0, …` chains were wrong). Sta
 | `campaignDifficulty` | MetaProgression → LastPickedDifficulty | ptr/enum | lead | Champion% warning only (M10) |
 | `continueRunState` | `EContinueRunState` | byte | lead | Paddock / StartEvent / PostEvent / LeavePlanet; between-race phases |
 
-**F. Front end / menus.**
+**F. Front end / menus.** Mostly superseded by A0: "Start Event" / scenario start are departures
+from `FrontEnd.PrimaryModeSelect`, and "which event was selected" is answered by `stageName` once
+the race loads (see **Start States**, latch-and-confirm). M4 / M5 are closed as memory hunts.
 
 | Reading | Field | Type | Status | Notes |
 |---|---|---|---|---|
-| `arcadeStartPressed` | `UArcadeEntryVM` or flow state | ? | find | M4 Arcade "Start Event"; M5 Scenario start |
-| `arcadeSelectedEvent` | `UArcadeEntryVM` event def / name | ? | find | must be *Landspeeder Ace* for Arcade% |
-| `frontEndFlowState` | `EFrontEndFlowState` | byte | lead | menu location, for "we are in a menu, not loading" |
 | `medalResult` | results / goal state | ? | find | M8 Bronze beaten; fallback = compare `finishTime` to the def's Bronze time |
 
 **G. Engine / misc.**
@@ -143,6 +168,9 @@ snapshot; the lambda that computes it is listed under **Functions**.
 
 | Property | Type | Meaning | Status |
 |---|---|---|---|
+| `FlowMachine` | string | `Race` / `FrontEnd` / `Paddock` / `PaddockNarrative` / `Pvp` from `flowEnumCount`; `None` when 0 (chain broken: level load); `Unknown` otherwise | verified |
+| `FlowState` | int | `flowState`, only meaningful with `FlowMachine` | verified |
+| `Flow` | string | `FlowMachine + "." + FlowState`, e.g. `Race.5`, `Paddock.4`, `None` — the key edges are detected on | verified |
 | `HudVmPresent` | bool | HUD view model pointer resolved | have (`hudVM != 0`) |
 | `LapsSane` | bool | `totalLaps` in (0, 100] and `playerLap` in range (100 = Elimination) | have (v0.4.1 bound is `< 100`, BUGS.md #3) |
 | `InRace` | bool | local player is in a live race | have |
@@ -151,7 +179,8 @@ snapshot; the lambda that computes it is listed under **Functions**.
 | `Finished` | bool | player crossed the final line | have (raw) |
 | `Failed` | bool | timed out / wrecked / eliminated / fail flags | lead |
 | `Paused` | bool | game is paused | lead |
-| `Loading` | bool | between levels / race not yet live | lead |
+| `Loading` | bool | `FlowMachine == None`, or `Race ∈ {LoadingPhase 1, WaitForLevelToLoad 10, WaitForClientsToBeReady 11}` | verified readings |
+| `InMenu` | bool | `FlowMachine ∈ {FrontEnd, Paddock}` | verified readings |
 | `EventKind` | enum | TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown — debug / mismatch warning only, never drives behaviour | lead |
 | `EventId` | string | stable event name (Landspeeder Ace, The Experiment, Sebulba final, …) | lead |
 | `MapId` | string | track internal name | lead |
@@ -171,7 +200,8 @@ snapshot; the lambda that computes it is listed under **Functions**.
 | Field | Meaning | Set by |
 |---|---|---|
 | `Profile` | the active category profile (see **Category profiles**) | the Category setting, re-read on settings change |
-| `Phase` | `Idle` → `Armed` (menu start seen, no race yet) → `InRace` → `Between` (race done, next not loaded) → `Done` | start / finish / transition edges |
+| `Phase` | `Idle` → `Armed` (menu start seen, no race yet) → `InRace` → `Between` (race done, next not loaded) → `Done`. Apart from `Armed` and `Done` this is a **projection of `Flow`**, not something inferred from race values: `FrontEnd.*` ⇒ Idle, `Race.{4,5,18}` ⇒ InRace, `Race.{6,14,15,30,8}` / `Paddock.*` / `None` ⇒ Between | start / finish / flow edges |
+| `ArmedAt`, `ArmedFrom` | wall-clock stamp and `Flow` key of the menu departure that armed the run (latch-and-confirm) | menu-press start edges |
 | `EventsDone` | races or events completed in this run | end-of-race edge |
 | `IgtTotal` | sum of `FinishIgt` over completed races | end-of-race edge |
 | `LastEventId`, `LastMapId` | identity of the race last entered | race-entry edge |
@@ -187,6 +217,13 @@ snapshot; the lambda that computes it is listed under **Functions**.
   one is ticked, use the first and print a warning in Debug.
 - **Splits**: lap splits, per-race splits (multi-event), finish split.
 - **Reset**: on leaving the race (IL only — multi-event profiles ignore it between races).
+- **Menu start policy** (RTA categories that start from a menu press): *start on arrival,
+  backdated* (default: timer appears once the race machine confirms the event, with
+  `timer.Run.Offset` set so it reads from the press) vs *start on press, trust but verify* (timer
+  starts the instant the menu is left; reset if the game lands somewhere other than the expected
+  event). Same stamp either way; the switch only decides when the timer becomes visible. Expect
+  to revisit the default after runner feedback — a timer that doesn't visibly start on the
+  press reads as "it didn't work".
 - **Timing**: "Game Time = IGT" on/off (always on for IL; for RTA categories it just fills
   the Game Time column with the IGT sum the mods want in submissions).
 - **Pause stops timer** (once `Paused` exists).
@@ -201,13 +238,13 @@ All are `vars.*` lambdas. `s` = a snapshot; `(p, n)` = previous and current snap
 
 | Function | Question | Definition | Status | Used by |
 |---|---|---|---|---|
-| `IsRaceGameState(s)` | does GameState look like an `ARacingGameState`? | `LapsSane` (later: class or `raceFlowState` check) | have (as part of InRace) | everything |
-| `InRace(s)` | is the local player in a live race? | `HudVmPresent && LapsSane` | have | split, reset, Race start |
+| `IsRaceGameState(s)` | does GameState look like an `ARacingGameState`? | `FlowMachine == Race` (v0.4.1 used `LapsSane` as a proxy; keep it as a belt-and-braces `&&`) | verified | everything that reads group A/B/D |
+| `InRace(s)` | is the local player in a live race? | `HudVmPresent && LapsSane` — unchanged; `Flow ∈ Race.{4,5,18}` is the cross-check, not a replacement, because the crossing-based ILs must not change behaviour | have | split, reset, Race start |
 | `InRaceStrict(s)` | …and lap counters agree? | `InRace && LapsInSync` | have | grid starts |
 | `IsPaused(s)` | is the game paused? | `pauserPlayerState != 0` | lead | isLoading (optional), debug |
-| `IsLoading(s)` | between levels / race not live? | `raceFlowState ∈ {LoadingPhase, WaitForLevelToLoad}`; fallback `!HudVmPresent && Run.Phase == Between` | lead | multi-event transitions, load removal if ever ruled in |
-| `InMenu(s)` | front end, not a race, not a load? | `frontEndFlowState` set and `!InRace` | lead | menu-press starts |
-| `IsTearingDown(p, n)` | did the race we were in just go away? | `p.InRace && !n.InRace`, or `p.playerLap ≥ 1 && n.playerLap == 0` | have (reset) | reset, dead-stamp capture |
+| `IsLoading(s)` | between levels / race not live? | `FlowMachine == None`, or `Race ∈ {1, 10, 11}` | verified readings | multi-event transitions, latch-and-confirm, load removal if ever ruled in |
+| `InMenu(s)` | front end or paddock, not a race, not a load? | `FlowMachine ∈ {FrontEnd, Paddock}` | verified readings | menu-press starts, R4 |
+| `IsTearingDown(p, n)` | did the race we were in just go away? | `p.FlowMachine == Race && (n.FlowMachine != Race || n.FlowState ∈ {PrepareToLeave 30, Leaving 8})`; v0.4.1's `p.playerLap ≥ 1 && n.playerLap == 0` stays as the fallback | have (reset) | reset, dead-stamp capture |
 
 ### Edges ("what just happened?")
 
@@ -219,11 +256,15 @@ All are `vars.*` lambdas. `s` = a snapshot; `(p, n)` = previous and current snap
 | `FinishEdge(p, n)` | `finished` 0→1 | have | every end state, race splits |
 | `FailEdge(p, n)` | `Failed` false→true | lead | retry handling (Arcade%, NG+ Sebulba%) |
 | `RaceEnteredEdge(p, n)` | `!p.InRace && n.InRace` with a new `RaceStamp` | — | run bookkeeping (`LastEventId`), Scenario race counting |
-| `NewRaceInstance(p, n)` | `RaceStamp`/`LapStamp` differ from `Run.Dead*` | have (inline) | guards every start edge |
-| `PrologueEdge(p, n)` | `playingPrologue` 0→1 | verified | Sebulba%, Any%, NG+ ×3 |
-| `ActIIIContinueEdge(p, n)` | `activeRun` null→ptr and `CampaignAct == ActIII` | verified / lead | NG+ Act III |
-| `ArcadeStartEdge(p, n)` | "Start Event" pressed with `arcadeSelectedEvent == LandspeederAce` | find | Arcade% |
-| `ScenarioStartEdge(p, n)` | scenario start confirmed | find | Scenarios |
+| `NewRaceInstance(p, n)` | `RaceStamp`/`LapStamp` differ from `Run.Dead*` | have (inline) | guards every race-value start edge |
+| `FlowEdge(p, n)` | `p.Flow != n.Flow` — any flow transition | verified readings | debug log, everything below |
+| `FlowEnter(p, n, machine, state)` | `n.Flow == machine.state && p.Flow != n.Flow` | verified readings | S4, R4, phase projection |
+| `FlowLeave(p, n, machine, state)` | `p.Flow == machine.state && n.Flow != p.Flow` | verified readings | S3, S5, S6 |
+| `PrologueEdge(p, n)` | `playingPrologue` 0→1 | verified | Sebulba%, Any%, NG+ ×3 (which of new / reset is the profile's business) |
+| `ActIIIStartRunEdge(p, n)` | `FlowEnter(Paddock, InWorld 4)` from `Paddock.{2, 3}` with `CampaignAct == ActIII`; `activeRun` null→ptr confirms it is a run start rather than a resume | verified flow / lead gates | NG+ Act III |
+| `MenuDepartureEdge(p, n)` | `FlowLeave(FrontEnd, PrimaryModeSelect 1)` — the "Start Event" / scenario start press, within one poll | verified readings; exact sequence after the press TBC | Arcade%, Scenarios (arms the run) |
+| `ArrivalConfirmEdge(p, n, eventId)` | `Run.Phase == Armed && FlowEnter(Race, *) && EventId == eventId` — the race machine appeared and it is the expected event | verified readings | Arcade%, Scenarios (confirms / cancels the arm) |
+| `ArrivalWrongEdge(p, n)` | `Run.Phase == Armed && (FlowEnter(FrontEnd, *) || (FlowMachine == Race && EventId known && != expected))` | verified readings | drops the arm, or resets under "trust" |
 | `CategoryChanged()` | settings differ from `Run.Profile` | — | update (re-arm) |
 
 ### Timing ("what time is it?")
@@ -268,18 +309,44 @@ BUGS.md #1 originally read garbage at that offset, `NOTES.md` now says verified 
 
 ## Start States
 
-Each category profile picks exactly one. All are guarded by `NewRaceInstance` where a race
-value is involved, and by `Run.Phase == Idle`.
+Each category profile picks exactly one. Two families:
+
+- **Crossing / grid starts** (S1, S2): the IL categories are ranked by IGT and the start must be
+  the exact line crossing or grid release. The flow machine is not precise enough for these
+  (60 Hz poll vs a server-time stamp) and they stay exactly as in v0.4.1, guarded by
+  `NewRaceInstance` and `Run.Phase == Idle`.
+- **Flow-edge starts** (S3–S6): the RTA categories start from a button press in a menu, and the
+  press is a flow transition. Two sub-cases: an edge *within one machine* (S4, paddock) is a
+  clean single-tick event; an edge that *crosses a level load* (S5, S6 and the campaign launch)
+  is observed as `FrontEnd.1 → None → Race.1 → … → Race.13` and needs latch-and-confirm.
 
 | # | Trigger | Edge | Extra gate | Categories | Status |
 |---|---|---|---|---|---|
 | S1 | First start-line crossing (rolling start) | `FirstCrossingEdge` | — | Arcade Time Trial, Precision Driving | have |
 | S2 | Grid released (countdown over) | `RaceGoEdge` | `InRaceStrict` | Tales of Podracing | have |
-| S3 | New campaign / campaign reset confirmed | `PrologueEdge` | — | Sebulba%, Any%, NG+ Sebulba%, NG+ Any%, NG+ Champion% | verified, chain TBD |
-| S4 | Act III loadout Continue | `ActIIIContinueEdge` | `CampaignAct == ActIII`; confirm `activeRun` doesn't flip on Act I/II or save resume | NG+ Act III | verified, index TBC |
-| S5 | Arcade "Start Event" on Landspeeder Ace | `ArcadeStartEdge` | `arcadeSelectedEvent == LandspeederAce` | Arcade% | find (M4) |
-| S6 | Scenario start confirmed | `ScenarioStartEdge` | — | Arcade Scenarios | find (M5), rule TBD with mods |
-| S7 | *(fallback)* first race's go | `RaceGoEdge` with `Run.Phase == Idle` | only if S5/S6 can't be found; timer would start late vs the video-timed rule | Arcade%, Scenarios | — |
+| S3 | New campaign / campaign reset confirmed | `PrologueEdge`; cross-check `FlowLeave(FrontEnd, 1)` → `FrontEnd.2 LaunchingCampaign` for a new campaign (reset-Accept sequence not yet recorded) | — | Sebulba%, Any%, NG+ Sebulba%, NG+ Any%, NG+ Champion% | verified field, chain TBD |
+| S4 | Act III "Start Run" → loadout → Continue | `ActIIIStartRunEdge` (`Paddock.2 → Paddock.4`) | `CampaignAct == ActIII`; `activeRun` flip as confirmation | NG+ Act III | verified flow; Act index TBC |
+| S5 | Arcade "Start Event" on Landspeeder Ace | `MenuDepartureEdge` arms; `ArrivalConfirmEdge(LandspeederAce)` confirms | `primaryFlow == Arcade` (lead) | Arcade% | verified readings; press sequence + event name TBC |
+| S6 | Scenario start | `MenuDepartureEdge` arms; `ArrivalConfirmEdge(first scenario event)` confirms | `stageCount > 1` on arrival | Arcade Scenarios | verified readings; rule TBD with mods |
+
+S7 (first race's go as a fallback) is gone: the flow edges make it unnecessary.
+
+**Latch-and-confirm** (S5, S6, and S3 if the campaign launch turns out to need it):
+
+1. `MenuDepartureEdge`: stamp `Run.ArmedAt = DateTime.Now`, `Run.ArmedFrom = p.Flow`,
+   `Phase = Armed`. Under the *trust* policy the timer starts on this tick.
+2. While `Armed`: the chain reads `None` through the load, then `Race.1/10/11/12/13…`. Nothing
+   fires until `EventId` is readable (`stageName` is populated with the GameState, so by
+   `Race.1` at the latest).
+3. `ArrivalConfirmEdge(expected)`: under the *backdated* policy, start now with
+   `timer.Run.Offset = -(DateTime.Now − ArmedAt)` so the displayed time reads from the press.
+   Under *trust*, nothing to do. Either way `Phase` follows the race machine from here.
+4. `ArrivalWrongEdge`: landed back in `FrontEnd.*`, or in a race whose `EventId` isn't the
+   expected one. *Backdated*: drop the arm, `Phase = Idle`. *Trust*: reset the timer (R7).
+
+The two policies share every edge and stamp; the setting only decides whether the timer is
+visible during the load. Start with *backdated* (never shows a time that is later taken back),
+and switch the default if runners report "I pressed start and nothing happened".
 
 Notes:
 - S1 keeps its deliberate *non*-gating on the HUD VM (NOTES v0.1.0). If the snapshot layer
@@ -288,8 +355,8 @@ Notes:
 - S3 cannot distinguish new campaign from reset; the profile decides. S3 and S4 fire in a
   menu, so the first race's `RaceGoEdge` is a *split-or-nothing* event for those profiles,
   never a start.
-- Menu-press starts put the run in `Phase = Armed`; the first `RaceEnteredEdge` moves it to
-  `InRace`.
+- `Phase` is otherwise projected from `Flow` every tick (see **Run state**); the only phases
+  the flow cannot tell us are `Armed` and `Done`.
 
 ## End States
 
@@ -308,6 +375,10 @@ A `FinishEdge` that is **not** the end condition is a per-race split (if enabled
 `Phase` to `Between`. A `FinishEdge` on an event with `Failed` set, or a retry of
 `LastFinishedEventId`, is neither.
 
+The finish stays on `FinishEdge` (a line crossing) for the same precision reason as S1/S2.
+`FlowEnter(Race, Results 15)` is a useful Debug cross-check that the finish was seen, not a
+trigger.
+
 ## Reset / ignore states
 
 The current single-race reset (`ResetOnLeave`) is wrong for every multi-event category:
@@ -316,12 +387,13 @@ all three of today's reset conditions fire. Profiles therefore own the reset pol
 
 | # | Condition | IL profiles | Multi-event profiles |
 |---|---|---|---|
-| R1 | `IsTearingDown` before `Finished` | reset (if enabled) | no-op; a restart of the same event is a retry |
+| R1 | `IsTearingDown` before `Finished` (race machine left, or entered `PrepareToLeave 30` / `Leaving 8`) | reset (if enabled) | no-op; a restart of the same event is a retry |
 | R2 | `IsTearingDown` after `Finished` | no-op (run is over) | no-op; expected between races |
 | R3 | `FailEdge` | reset (if enabled) | no-op; retries are allowed (Arcade%, NG+ Sebulba%) |
-| R4 | Back at the main menu with `Run.Phase ∈ {Armed, InRace, Between}` and no race for a long time | n/a | *maybe* reset; or never auto-reset and leave it to the runner |
+| R4 | `FlowEnter(FrontEnd, Root 0 / PrimaryModeSelect 1)` with `Run.Phase ∈ {InRace, Between}` — the runner backed out to the main menu | n/a | now a crisp edge instead of "no race for a long time"; still *maybe*: default off, leave it to the runner |
 | R5 | A fresh S3/S4/S5/S6 edge while a run is in progress | n/a | reset then start (runner restarted the category) |
 | R6 | `CategoryChanged` | reset run state (`ResetRun`), not the timer | same |
+| R7 | `ArrivalWrongEdge` while `Armed` under the *trust* menu-start policy | n/a | reset (the timer was started on the press and the press led somewhere else) |
 
 Dead-stamp capture (`CaptureDeadStamps`) runs on every teardown regardless of policy, since
 the false-start replay in BUGS.md #2 happens on every transition, including the ones
@@ -337,8 +409,8 @@ that isn't the end.
 | Arcade Time Trial | IGT | `FinishIgt` | S1 | laps | E1 | IL |
 | Precision Driving | IGT (adjusted) | `FinishIgt` (already adjusted) | S1 | laps | E1 | IL |
 | Tales of Podracing | IGT | `FinishIgt` | S2 | laps | E1 | IL |
-| Arcade Scenarios | RTA | `IgtTotal` | S6 (S7 fallback) | race (+ laps optional) | E2 | multi |
-| Arcade% | RTA | `IgtTotal` | S5 (S7 fallback) | event, skipping failed/retried | E3 | multi |
+| Arcade Scenarios | RTA | `IgtTotal` | S6 | race (+ laps optional) | E2 | multi |
+| Arcade% | RTA | `IgtTotal` | S5 | event, skipping failed/retried | E3 | multi |
 | Sebulba% / Any% | RTA | `IgtTotal` | S3 | race | E4 / E5 | multi |
 | NG+ Sebulba% / Any% / Champion% | RTA | `IgtTotal` | S3 | race | E4 / E5 | multi |
 | NG+ Act III | RTA | `IgtTotal` | S4 | race | E5 | multi |
@@ -354,16 +426,23 @@ Each step keeps the script shippable; ILs must not regress.
 
 0. Skeleton: function stubs, variables, placeholders where they do not exist.
 1. Introduce the snapshot layer and move the existing lambdas (`InRace`, `LapsSane`,
-   `LapsInSync`) and dead-stamp capture onto it. Behaviour identical to v0.4.1.
+   `LapsInSync`) and dead-stamp capture onto it. Add the A0 readings and `FlowMachine` /
+   `Flow` to the snapshot with a Debug line on every `FlowEdge` — read-only, so behaviour stays
+   identical to v0.4.1 while the state sequences for each category get recorded.
 2. Extract the edges (`RaceGoEdge`, `FirstCrossingEdge`, `LapEdge`, `FinishEdge`) and the
-   timing functions; rewrite `start{}` / `split{}` / `gameTime{}` against them.
-3. Add `vars.Run` and `RunGameTime`; `IgtTotal` is 0 for ILs so nothing changes yet.
+   timing functions; rewrite `start{}` / `split{}` / `gameTime{}` against them. Switch
+   `IsRaceGameState` and `IsTearingDown` to their flow definitions (fallbacks kept).
+3. Add `vars.Run` and `RunGameTime`; `IgtTotal` is 0 for ILs so nothing changes yet. `Phase`
+   is projected from `Flow`.
 4. Add profiles for the three IL categories (Time Trial, Precision, Podracing). Needs no new
    memory: Precision already works through the adjusted `finishTime`.
-5. Add the multi-event reset policy and `Phase` handling; test on a Scenario even without
-   S6, using S7, to shake out the between-race transitions (BUGS.md #2 territory).
-6. Add S3/S4 and E4/E5 (campaign) once the `UCampaignSubsystem` chain and `EventId` exist.
-7. Add S5/S6, E2/E3 as M4, M5, M8, M9 are found.
+5. Add the multi-event reset policy and latch-and-confirm (`MenuDepartureEdge`,
+   `ArrivalConfirmEdge`, `ArrivalWrongEdge`, the menu-start policy setting). Test on a
+   Scenario: S6 is live as soon as the press sequence is recorded in step 1, so the
+   between-race transitions (BUGS.md #2 territory) get exercised with the real start.
+6. Add S3/S4 and E4/E5 (campaign). S4 needs only the Act index; S3 and E4/E5 still wait on
+   the `UCampaignSubsystem` chain and the event names.
+7. Add S5 and E2/E3 as the event names, M8 (medal) and M9 are found.
 8. Separately: `IsPaused`, live `EventIgt` as the in-race Game Time, versioned `state` blocks.
 
 ## Open items this plan depends on
@@ -376,9 +455,14 @@ Each step keeps the script shippable; ILs must not regress.
   BUGS.md #3), and lap splits / the end condition need checking there (the event ends on
   elimination, not on lap 100).
 - Stable chain to `UCampaignSubsystem`; Act III index value; whether `activeRun` flips elsewhere.
-- M4 / M5 menu-press readings; M8 medal result; M9 stage count for Scenarios.
-- `raceFlowState` owner — would replace several heuristics (`IsLoading`, `IsRaceGameState`,
-  teardown detection) with one enum read.
+- M8 medal result; M9 stage count for Scenarios. (M4 / M5 closed by the flow edges.)
+- Flow machine, still to record live: the exact state sequence after Arcade "Start Event"
+  (does `FrontEnd.1` go to `LaunchingQuickRace 4` first, or straight to `None`?), after a
+  scenario start, on the campaign-reset Accept, and on Act III "Start Run" (`Paddock.2 → 3 → 4`
+  or `2 → 4`); `flowRecordCount` in the paddock; `BlueprintCreatedComponents[0]` is the GFSM
+  component in all three GameState Blueprints (verified in the race GameState and whichever
+  menu state the count was read in; check the third).
+- `primaryFlow` chain (`GWorld, 0x228, 0x398`).
 - Pause flag (`PauserPlayerState` lead).
 - Whether `hudEventTime` is smooth enough at 60 Hz to be the live Game Time.
 - Mods: Scenario start point; plain RTA vs load-removed; NG+ Champion% from a fresh save.
