@@ -205,7 +205,7 @@ snapshot; the lambda that computes it is listed under **Functions**.
 | `EventKind` | enum | TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown — debug / mismatch warning only, never drives behaviour | lead |
 | `EventId` | string | stable event name (Landspeeder Ace, The Experiment, Sebulba final, …) | lead |
 | `MapId` | string | track internal name | lead |
-| `StageIndex`, `StageCount`, `IsLastStage` | int / bool | multi-stage recipe position | lead |
+| `StageIndex`, `StageCount`, `IsLastStage` | int / bool | recipe stage position. **Every scenario race is a 1-stage recipe** (`stage 0/1` seen live), so this is Debug only | verified, not useful |
 | `LapIgt` | double | raw running lap time | verified |
 | `EventIgt` | double | running event time, Precision Driving checkpoint-adjusted | verified |
 | `FinishIgt` | double | final event time (≥ 0 only after finish) | have |
@@ -264,7 +264,8 @@ All are `vars.*` lambdas. `s` = a snapshot; `(p, n)` = previous and current snap
 | `RaceGoEdge(p, n)` | `raceStarted` 0→1 with `InRaceStrict(n)` and fresh `RaceStamp` | have | Podracing, Scenario races, campaign races |
 | `FirstCrossingEdge(p, n)` | `playerLap` 0→1, `!Finished`, `LapsSane`, fresh `LapStamp` | have | Time Trial, Precision (rolling starts) |
 | `LapEdge(p, n)` | `playerLap` n→n+1, 1 ≤ n < `totalLaps`, `!Finished` | have | lap splits, lap IGT re-sync |
-| `FinishEdge(p, n)` | `finished` 0→1 | have | every end state, race splits |
+| `FinishEdge(p, n)` | `finished` 0→1 | have | E1 (IL, raw v0.4.1 edge) |
+| `ValidFinishEdge(p, n)` | `FinishEdge && finishTime ≥ 0 && RaceStamp != Run.DeadRaceStamp` — a finish that counts, not the dead race replaying (BUGS.md #6) | have (refactor) | bookkeeping, `gameTime{}` snap, race split, E2–E5 |
 | `FailEdge(p, n)` | `Failed` false→true | lead | Debug only — no reset policy uses it (an IL retry goes through R1) |
 | `RaceEnteredEdge(p, n)` | `!p.InRace && n.InRace` with a new `RaceStamp` | have (refactor) | run bookkeeping (`LastEventId`) |
 | `NewRaceInstance(p, n)` | `RaceStamp`/`LapStamp` differ from `Run.Dead*` | have (inline) | guards every race-value start edge |
@@ -301,7 +302,7 @@ BUGS.md #1 originally read garbage at that offset, `NOTES.md` now says verified 
 | `MapId(s)` | track internal name | FString at HUD VM → track → InternalName | partial (bad in Precision; map only in campaign) | display, Scenario / campaign race recognition |
 | `EventId(s)` | stable event name | `stageName` (`FRaceEventInstance.InternalName`) | verified chain | Arcade% (Landspeeder Ace, The Experiment), Sebulba / Kestar finals |
 | `EventKind(s)` | TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown | `arcadeCategory` if `authoredEvent` is an arcade def (Plane→Podracing, Precision→Precision, else TimeTrial); campaign if `CampaignRunActive`; Scenario if recipe has >1 stage and not campaign | lead | **optional**: Debug warning when the loaded event doesn't match the chosen category. Never selects behaviour |
-| `IsLastStage(s)` | last race of a multi-stage recipe? | `StageIndex == StageCount − 1` (0-indexed) | verified readings | Scenarios end (M9) |
+| `IsLastStage(s)` | last race of a multi-stage recipe? | `StageIndex == StageCount − 1` (0-indexed) | verified; always true in scenarios (BUGS.md #6) | Debug only |
 | `IsEvent(s, name)` | is this the named event? | `EventId(s) == name` | chain verified; names TBC | E3, E4, E5 |
 | `IsRepeatFinish(s)` | is this a second finish of the event finished last? | `EventId(s) == Run.LastFinishedEventId` | — | per-event split dedupe |
 
@@ -363,10 +364,10 @@ finish split's Game Time is `IgtTotal` including this race.
 | # | Trigger | Condition | Categories | Status |
 |---|---|---|---|---|
 | E1 | Final-lap finish of the only race | `FinishEdge` | Arcade Time Trial, Precision Driving, Tales of Podracing | have |
-| E2 | Finish of the scenario's last race | `FinishEdge && IsLastStage` | Arcade Scenarios | verified readings (M9 = `activeStage` / `stageCount`) |
-| E3 | Finish of *The Experiment* | `FinishEdge && IsEvent(TheExperiment)` | Arcade% | event name TBC |
-| E4 | Finish of the Sebulba final (last race of Act I) | `FinishEdge && IsEvent(SebulbaFinal)` | Sebulba%, NG+ Sebulba% | event name TBC |
-| E5 | Finish of the Kestar's Podracer final (last race of Act III) | `FinishEdge && IsEvent(KestarFinal)` | Any%, NG+ Any%, NG+ Champion%, NG+ Act III | event name TBC |
+| E2 | Finish of the scenario's 5th distinct race | `ValidFinishEdge && !FinishIsRepeat && EventsDone ≥ 5` (`IsLastStage` is useless: each scenario race is a 1-stage recipe, BUGS.md #6) | Arcade Scenarios | implemented, untested |
+| E3 | Finish of *The Experiment* | `ValidFinishEdge && IsEvent(TheExperiment)` | Arcade% | name verified, untested |
+| E4 | Finish of the Sebulba final (last race of Act I) | `ValidFinishEdge && IsEvent(SebulbaFinal)` | Sebulba%, NG+ Sebulba% | event name TBC |
+| E5 | Finish of the Kestar's Podracer final (last race of Act III) | `ValidFinishEdge && IsEvent(KestarFinal)` | Any%, NG+ Any%, NG+ Champion%, NG+ Act III | event name TBC |
 
 No medal check on E3 and no Act check on E4 / E5: the moderator sees both. If runners ask for
 a medal check later it is one more `&&` on E3 against `medalResult` (M8), which is why that
@@ -378,8 +379,11 @@ adds its IGT to `IgtTotal` but does not split, so the split list stays in step w
 Whether the redo's IGT should count is a rules question (see **Open items**); counting it is the
 default because the IGT column is meant to be driving time with loads and menus removed.
 
-The finish stays on `FinishEdge` (a line crossing) for the same precision reason as S1/S2.
-`FlowEnter(Race, Results 15)` is a Debug cross-check that the finish was seen, not a trigger.
+The finish stays on a line crossing for the same precision reason as S1/S2. Run-length
+categories use `ValidFinishEdge`, because the torn-down race's memory replays `finished = 1`
+during the next load (BUGS.md #6) — the same dead-stamp check the starts use. Once the end has
+fired (`Phase = Done`) a run-length profile splits no more. `FlowEnter(Race, Results 15)` is a
+Debug cross-check that the finish was seen, not a trigger.
 
 ## Reset / ignore states
 
@@ -450,7 +454,7 @@ Each step keeps the script shippable; ILs must not regress.
 5. ✅ Run-length family (2026-10-20, **untested**): `MenuLeaveEdge`, `PaddockNarrative` in
    `InMenu`, the redo dedupe in `OnRaceFinished` (`Run.FinishIsRepeat`, read by `split{}` on the
    same tick), `Family`-driven reset (none) and `isLoading`, `Phase` collapsed to Idle / Running /
-   Done, E2 by `IsLastStage`, E3 by The Experiment's `stageName`. The latch-and-confirm
+   Done, E2 by distinct-race count, E3 by The Experiment's `stageName`. The latch-and-confirm
    scaffolding, `MenuStartTrust`, `MedalBeaten`, `OnRaceFailed` / `IsRetry` and the campaign
    stubs are gone. S4 (`ActIIIStartRunEdge`) is wired too, pending the 2→3→4 vs 2→4 recording.
    Test first on Arcade%: Landspeeder Ace, then skip to The Experiment.
@@ -463,17 +467,21 @@ Each step keeps the script shippable; ILs must not regress.
 
 - Event names (`stageName`): The Experiment, the Sebulba final, the Kestar final. Confirm ASL
   `string` reads auto-detect UTF-16.
-- Flow machine, still to record live: the sequence after Arcade "Start Event" (`FrontEnd.1 →
-  4 → None` or straight to `None` — either fires S3; this is for the Debug log), the
-  campaign-reset Accept (from the main menu or the paddock, see the S3 notes), Act III "Start
-  Run" (`Paddock.2 → 3 → 4` or `2 → 4`); whether `PaddockNarrative` shows up in normal paddock
-  play; `flowRecordCount` in the paddock; `BlueprintCreatedComponents[0]` is the GFSM component
-  in all three GameState Blueprints (verified in the race GameState and whichever menu state the
-  count was read in; check the third).
+- Flow machine, recorded live (2026-10-20, scenario start): `FrontEnd.1 → FrontEnd.2 → None`
+  (S3 fires here; `None ↔ FrontEnd.2` flickers once during the load) `→ Paddock.1 → 3 → 4 →
+  None → Race.9 → 10 → 11 → 13 → 3 → 17 → 4 → 5`; finish `→ 14 → 15 → None`. So a scenario is
+  a campaign-style run through the paddock, and `Race.9` is a loading state not in the list
+  above. Still to record: Arcade "Start Event", the campaign-reset Accept (from the main menu or
+  the paddock, see the S3 notes), Act III "Start Run" (`Paddock.2 → 3 → 4` or `2 → 4`);
+  whether `PaddockNarrative` shows up in normal paddock play; `flowRecordCount` in the paddock;
+  `BlueprintCreatedComponents[0]` is the GFSM component in all three GameState Blueprints
+  (verified in the race GameState and whichever menu state the count was read in; check the
+  third).
 - Elimination events: `totalLaps` = 100. `LapsSane` must allow 100 (v0.4.1 uses `< 100`, see
   BUGS.md #3), and lap splits / the end condition need checking there (the event ends on
   elimination, not on lap 100).
-- Scenarios: confirm `activeStage` / `stageCount` behave across the five races (M9).
+- Scenarios: M9 answered — each race is a 1-stage recipe, so the end is the 5th distinct finish
+  (`SCENARIO_RACE_COUNT`). Confirm the count against the rules, and that a redone race dedupes.
 - Game Time for a repeated event (Arcade% redo): the plan adds every finished attempt's IGT to
   `IgtTotal`. If the mods want only the counting attempt, it is a one-line change in
   `OnRaceFinished`; ask when the IGT column is agreed.

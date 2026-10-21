@@ -92,3 +92,59 @@ Open issues with the autosplitter. Dev-facing; background on the values involved
 # 4. Arcade%
 
 - **Seen:** start when loading Super Surge, which might have the same track id as Landspeeder Ace. Not huge since it should have already started by the time the person reaches it
+
+## 5. Live Game Time starts too early in grid races (refactor, run-length categories)
+
+- **Seen:** found in review (2026-10-20), not yet seen in a run. Lost in the migration when
+  Tales of Podracing was disabled and the run-length family was added: v0.4.1 only ever started
+  a grid race's timer on the grid release, and nothing in the refactor took that job over for
+  races inside a run.
+- **Cause:** run-length profiles freeze Game Time with `isLoading{}` only while `!InRace`.
+  `InRace` (HUD VM present and laps sane) is already true during the countdown, before
+  `raceStarted` flips at the grid release, so Game Time runs through the countdown (and possibly
+  the intro, if the HUD VM exists by then). Affects every grid-start event in Arcade%, Scenarios
+  and the campaign.
+- **Impact:** the live Game Time reads high by the countdown length until the race finishes.
+  The finish corrects it: `OnRaceFinished` adds `EventFinishTime` to `IgtTotal` and `gameTime{}`
+  snaps to the total, so splits and the final IGT are right. Lap splits inside a grid race are
+  not re-synced either: the lap correction is skipped when the running Game Time is more than
+  0.5 s off, which it will be, so those lap splits keep the early-start error. Only someone
+  watching the live IGT closely, or using lap splits in a run-length category, would notice.
+- **Fix idea:** treat the race as live only once it has really started. For run-length profiles
+  freeze while `!(InRace && (RaceGo || playerLap >= 1))`: grid races unfreeze on
+  `raceStarted` 0→1 (`RaceStartTime` is the countdown end), rolling starts on the first crossing
+  (`RaceStartTime` is that crossing's stamp). The same condition would let a re-enabled Tales of
+  Podracing IL keep its S2 start unchanged.
+- **Status:** open in the refactor script. Not present in v0.4.1 (it has no run-length categories).
+
+## 6. Scenario run ended on the first race, then "ended" again on the next load
+
+- **Seen (2026-10-20, refactor 0.5.0-dev, Debug log):** Arcade Scenarios. START fired once,
+  correctly (`FrontEnd.2 -> None`). The first race's finish produced `END`. On the way into the
+  second race the log then showed `flow None -> Race.15`, `raceStarted 0 -> 1` with the **same**
+  `RaceStamp` as the finished race, `playerLap 0 -> 2`, `finished 0 -> 1` with the same
+  `finishTime`, and a second `race finished` / `END`: IgtTotal doubled (6.885 → 13.770) and the
+  splits advanced again. The runner saw "timer split again when I hit start".
+- **Two causes:**
+  1. **Wrong end condition.** E2 was `FinishEdge && IsLastStage`. Each scenario race is its own
+     **1-stage recipe** (`stage 0/1` for every race), so `IsLastStage` is true on race one. The
+     recipe stage count says nothing about the scenario; the scenario sequence lives in the
+     paddock / campaign-run machinery (the scenario goes `FrontEnd.1 -> FrontEnd.2 -> None ->
+     Paddock.1 -> 3 -> 4 -> None -> Race…`, i.e. through the paddock like a campaign).
+  2. **Replayed finish.** BUGS.md #2 for finishes: during the next level's load the chain
+     flickers back to the dead race GameState and replays `finished = 1` with the dead
+     `RaceStartTime`. `FinishEdge` fired, bookkeeping added the IGT again, `gameTime{}` snapped
+     to the doubled total, and the end condition fired again (the redo dedupe only guarded the
+     per-race split, and ran after the end check).
+- **Fix (refactor, 2026-10-20):**
+  - `ValidFinishEdge` = `FinishEdge && finishTime >= 0 && RaceStamp != DeadRaceStamp` (dead
+    stamp 0 = nothing torn down yet). Drives `OnRaceFinished`, the `gameTime{}` snap, the race
+    split and every run-length end condition. A rejected finish logs `finish ignored: …`.
+    E1 (IL) stays on the raw v0.4.1 edge.
+  - E2 is now `ValidFinishEdge && !FinishIsRepeat && EventsDone >= 5` — the fifth distinct
+    race's finish. `SCENARIO_RACE_COUNT = 5` is a rules constant.
+  - Run-length profiles stop splitting once the end has fired (`Phase == Done`).
+  - `RaceEnteredEdge` requires `RaceStamp > 0` (`RaceStartTime` reads −1 before the start;
+    it was booking a "race entered" with stamp −1).
+- **Status:** fixed in the refactor script, untested. Needs a real scenario with 5 finishes
+  and at least one redone race.
