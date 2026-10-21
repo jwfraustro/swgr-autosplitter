@@ -7,28 +7,37 @@ category profiles), `BUGS.md`.
 > Eventually this becomes the user-facing doc on how the autosplitter behaves in each
 > category; keep **Categories** written so it can be lifted out.
 
-## Categories (speedrun.com, mods' rules 2026-10-19)
+## Categories (speedrun.com, mods' rules as of 2026-10-21)
 
-Every category requires video. Single events are ranked by IGT; everything multi-event is
-ranked by RTA, with the per-race `EventFinishTime` sum tracked as IGT for the submission.
+Three ways of being judged:
 
-| Category | Timing | Start | End |
-|---|---|---|---|
-| Arcade Time Trial | IGT | first start-line crossing (rolling start) | final-lap finish |
-| Arcade Precision Driving | IGT, 1.5 s off per gate | first start-line crossing | final-lap finish |
-| Tales of Podracing | IGT | grid released (countdown over) | final-lap finish |
-| Arcade Scenarios (5 races, fixed character) | RTA (+IGT) | **TBD** with the mods; likely the scenario's start confirm | finish of the 5th race |
-| Arcade% (all 50 events in order; 3 Deluxe excluded; retries allowed) | RTA | "Start Event" on *Landspeeder Ace* | finish of *The Experiment* with Bronze beaten |
-| Sebulba% (fresh save, any difficulty) | RTA | "Start New Campaign" | final-lap finish vs Sebulba (last race of Act 1) |
-| Any% (fresh save, any difficulty) | RTA | "Start New Campaign" | final-lap finish vs Kestar's Podracer (last race of Act 3) |
-| NG+ Sebulba% / Any% / Champion% | RTA | "Accept" on the campaign-reset "Are you sure?" | as above |
-| NG+ Act III | RTA | "Continue" on the Act III loadout check (after Start Run) | final-lap finish vs Kestar's Podracer |
+| Group | Ranked by | Timer requirement |
+|---|---|---|
+| Arcade events (Time Trial, Precision Driving, podraces) | IGT | submit the time the game shows on the event selection screen |
+| Arcade Scenarios | IGT | as above: the game's own scenario time (loads and menus between the 5 races don't count). No RTA timer needed |
+| Arcade% | RTA | real-time timer on screen; also add up and submit total IGT |
+| Story Campaign (Sebulba%, Any%, NG+ variants, NG+ Act III) | RTA | real-time timer on screen |
 
-A failed Arcade% attempt that gets retried must not split or end the run; same for failing out
-and switching vehicle in NG+ Sebulba%.
+Earlier rulings this replaces: Scenarios were RTA (2026-10-19); "Tales of Podracing" was its own
+category and has been removed. Podraces are now ordinary arcade events, identical to any other
+grid-start race, and appear both as single events and inside Arcade%.
 
-Open with the mods: exact Scenario start point; plain RTA or load-removed (assumed plain);
-NG+ Champion% from a fresh save; whether a redone Arcade% event's IGT counts.
+| Category | Start | End |
+|---|---|---|
+| Arcade Time Trial / Precision | first start-line crossing (rolling start) | final-lap finish |
+| Arcade podrace | grid released (countdown over) | final-lap finish |
+| Arcade Scenarios (5 races, fixed character) | first race's go (nothing before it is timed) | finish of the 5th race |
+| Arcade% (all 50 events in order; 3 Deluxe excluded; retries allowed) | "Start Event" on *Landspeeder Ace* | finish of *The Experiment* with Bronze beaten |
+| Sebulba% / Any% (fresh save, any difficulty) | "Start New Campaign" | final-lap finish vs Sebulba (Act 1) / Kestar's Podracer (Act 3) |
+| NG+ Sebulba% / Any% / Champion% | "Accept" on the campaign-reset "Are you sure?" | as above |
+| NG+ Act III | "Continue" on the Act III loadout check (after Start Run) | final-lap finish vs Kestar's Podracer |
+
+Precision Driving IGT already has the 1.5 s per gate deducted. A failed Arcade% attempt that gets
+retried must not split or end the run; same for failing out and switching vehicle in NG+ Sebulba%.
+
+Open with the mods: whether Arcade% RTA is load-removed (assumed plain); NG+ Champion% from a
+fresh save; whether a redone Arcade% event's IGT counts in the submitted total. Deferred until
+someone reports a problem: how the game's displayed Scenario time treats a redone race.
 
 ## Observed behaviour
 
@@ -39,7 +48,7 @@ NG+ Champion% from a fresh save; whether a redone Arcade% event's IGT counts.
 - `URaceEventVM.CurrentLapNumber` starts at 1; the HUD VM pointer goes away on leaving.
   In-race sanity: HUD VM present and `HUD == CurrentLapNumber + 1`.
 - Arcade Time Trial / Precision are rolling starts: control arrives at the line crossing and
-  `bIsRaceStarted` may never be relied on. Grid events (Podracing, campaign, Scenarios) release
+  `bIsRaceStarted` may never be relied on. Grid events (podraces, campaign, Scenarios) release
   on `bIsRaceStarted` 0→1.
 - `bHasFinishedEvent` flips on the finish crossing within a tick; `bIsRaceFinished` on the game
   state is the local player's finish, not all racers.

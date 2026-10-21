@@ -13,12 +13,14 @@ silently refuse to start while the runner is already driving. A wrong start is t
 
 Two families of category, differing in kind:
 
-- **IL** (Arcade Time Trial, Precision Driving, Tales of Podracing): ranked by IGT, retried
+- **IL** (single Arcade events: Time Trial, Precision Driving, podraces): ranked by IGT, retried
   constantly, hands-free loop wanted. Start on the exact crossing / grid release, auto-reset on
   retry, replay guards on the stamps. v0.4.1 behaviour, kept verbatim.
-- **Run-length** (Arcade%, Arcade Scenarios, the campaign categories): ranked by RTA. Start on
-  the flow edge that leaves the menu, split once per finished event, stop on the end event,
-  never auto-reset. Game Time is the IGT sum, for the submission column.
+- **Run-length** (Arcade%, Arcade Scenarios, the campaign categories): several races in one
+  run. Start on the flow edge that leaves the menu (or the first race's go), split once per
+  finished event, stop on the end event, never auto-reset. Game Time is the IGT sum. Arcade%
+  and the campaign are ranked by RTA; Scenarios by that IGT sum (rules change 2026-10-21,
+  see below).
 
 Robustness against the *game's* memory (stale values replaying after a teardown, BUGS.md #2/#6)
 stays in both families; that is not policing.
@@ -49,8 +51,8 @@ Decisions behind it:
 | # | Trigger | Categories | Why this way |
 |---|---|---|---|
 | S1 | first start-line crossing (`playerLap` 0→1) | Time Trial, Precision | rolling start; the crossing is the IGT zero. Not gated on the HUD VM, which can appear a tick later |
-| S2 | grid released (`raceStarted` 0→1, counters in sync) | Podracing | grid start; profile currently disabled per the mods |
-| S3 | left the menu (`InMenu` true→false, to Race or to None during the load) | Arcade%, Scenarios, all campaign except Act III | any launch from the main menu or paddock starts the timer, like every "new game" autosplitter. Fires within one poll of the press and the runner sees it start. `PaddockNarrative` counts as menu so a cutscene can't fire it |
+| S2 | grid released (`raceStarted` 0→1, counters in sync) | Arcade podraces; Scenarios (pending) | grid start. Profile currently commented out as "Tales of Podracing"; needs reviving as a plain arcade IL, see below |
+| S3 | left the menu (`InMenu` true→false, to Race or to None during the load) | Arcade%, all campaign except Act III (Scenarios today, pending the change below) | any launch from the main menu or paddock starts the timer, like every "new game" autosplitter. Fires within one poll of the press and the runner sees it start. `PaddockNarrative` counts as menu so a cutscene can't fire it |
 | S4 | left Paddock `CampaignSetup 2` for `PreWorld 3` / `InWorld 4` | NG+ Act III | same machine, no load, so S3 never sees it |
 
 S1/S2 are guarded by `NewRaceInstance` (dead-stamp check); S3/S4 fire in a menu and need none.
@@ -108,6 +110,35 @@ Dead-stamp capture runs on every teardown in both families.
   a behaviour change); run-length also freezes whenever not in a live race.
 - Campaign splits: the only must-split is the end condition. Per-planet or per-event splits are
   a route question; leave until someone asks.
+
+## Rules change 2026-10-21 (not yet in code)
+
+Mods' wording: Story Campaign and Arcade% need a real-time timer on screen; Arcade% is ranked
+RTA with total IGT submitted alongside; Arcade events **and Scenarios** are ranked by IGT, using
+the time the game shows on the event selection screen. "Tales of Podracing" is gone; podraces
+are ordinary arcade events.
+
+What it changes:
+
+1. **Scenarios are IGT.** The S3 menu-leave start and RTA column no longer matter; Game Time is
+   the thing. The IGT sum is already what `IgtTotal` produces, so the minimal change is
+   `RankedBy = "IGT"` and a start on the first race's go (S2, with `StartStamp = "Race"`) so the
+   timer visibly starts when the timing does. Family stays run-length (no auto-reset, split per
+   race, end on the 5th distinct finish, `isLoading` outside a live race).
+   Deferred: how the game's own scenario time treats a redone race. Today a redone race *adds*
+   its time to `IgtTotal`; if the game shows last-attempt-per-race, `OnRaceFinished` would have
+   to *replace* that `EventId`'s entry (a per-event dictionary instead of a running sum). Not
+   worth settling until a runner reports a mismatch; the submitted time comes from the game's
+   screen either way.
+2. **Podraces as an arcade IL.** Revive the commented-out `Cat_Podracing` profile as
+   "Arcade — Podrace (grid start)": IL family, S2, `StartStamp = "Race"`, E1. Alternatively fold
+   all single arcade events into one profile whose start is "S1 or S2, whichever fires first";
+   that depends on rolling starts never raising `raceStarted` before the crossing (DEV_NOTES
+   says Arcade may never set it at all, so it is probably safe, but record one of each first).
+3. **Arcade% is unchanged** (RTA, S3, E3, IGT sum alongside). Podraces inside it are already
+   handled: splits are on finishes, not starts. The redo rule for its IGT column is a separate
+   question for the mods (DEV_NOTES "Open").
+4. Setting labels and tooltips: drop "Tales of Podracing", reword Scenarios as IGT.
 
 ## Status and remaining work
 
