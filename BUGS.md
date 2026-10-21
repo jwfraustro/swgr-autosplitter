@@ -1,6 +1,6 @@
 # Known bugs
 
-Open issues with the autosplitter. Dev-facing; background on the values involved is in
+Open issues with the autosplitter. Dev-facing; addresses are in `MEMORY_OFFSETS.md`, behaviour in
 `DEV_NOTES.md`.
 
 ## 1. Final time ~0.01–0.03 s off the results screen

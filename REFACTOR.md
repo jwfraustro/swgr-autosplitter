@@ -7,7 +7,7 @@ categories land. Names are proposals. Status markers used throughout:
 - **have** — exists in `SWGR_Autosplitter.asl` v0.4.1 (possibly under another name).
 - **verified** — address / behaviour confirmed live but not used by the script yet.
 - **lead** — a candidate in the dump; unverified.
-- **find** — no candidate yet; needs a memory hunt (see `NOTES.md` → *Memory to find*).
+- **find** — no candidate yet; needs a memory hunt (see `DEV_NOTES.md` → *Open*).
 
 ## Shape of the refactored script
 
@@ -74,7 +74,7 @@ stays in both families; that is not policing.
 
 ### Raw readings (`state{}`)
 
-Grouped by owning object. "Chain" refers to the chains in `DEV_NOTES.md`.
+Grouped by owning object. "Chain" refers to the chains in `MEMORY_OFFSETS.md`.
 
 **A0. Flow state machine** (`GWorld, 0x1B0, 0x298, 0x0` = GameState → `BlueprintCreatedComponents[0]`
 = `UGameFlowStateMachineComponent`). **Every** GameState carries this component — in a race it runs
@@ -293,7 +293,7 @@ Note on `RunGameTime`: this single formula covers ILs (`IgtTotal` = 0) and run-l
 and it is naturally paused during loads and menus because `EventIgt` isn't advancing. It
 makes `isLoading{}` simply `!InRace || Finished`. Whether to also use it *live* inside a race
 (instead of real time + re-sync at crossings) depends on `hudEventTime` being smooth at 60 Hz;
-BUGS.md #1 originally read garbage at that offset, `NOTES.md` now says verified — test it.
+BUGS.md #1 originally read garbage at that offset, `DEV_NOTES.md` now says verified — test it.
 
 ### Identity ("which race / event is this?")
 
@@ -345,7 +345,7 @@ Notes:
   `MenuLeaveEdge`, so the profile does not care, but record the sequence once to confirm
   neither passes through a non-menu machine first.
 - `PaddockNarrative` counts as a menu machine so a paddock cutscene cannot fire S3.
-- S1 keeps its deliberate *non*-gating on the HUD VM (NOTES v0.1.0). If the snapshot layer
+- S1 keeps its deliberate *non*-gating on the HUD VM (the HUD VM can appear after the crossing tick). If the snapshot layer
   makes that fragile, add a `PendingStart` latch: set on the raw edge, fire on the first tick
   where `InRace`.
 - S3 and S4 fire in a menu, so the first race's `RaceGoEdge` is never a start for those
