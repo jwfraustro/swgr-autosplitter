@@ -102,6 +102,9 @@ state("SWGR-Win64-Shipping")
     // long   campaignDifficulty : ???, 0xE0, 0x110;  // LEAD  MetaProgression -> LastPickedDifficulty (UCampaignDifficultyDef*). Champion% warning only (M10)
     // byte   continueRunState   : ???;               // LEAD  EContinueRunState: Paddock 0 ... StartEvent 4, PostEvent 5, LeavePlanet 6 — between-race phases (M11)
 
+    // CampaignSubsystem.ActiveRun "SWGR-Win64-Shipping.exe"+0AE07F10
+    float currentRunTime : "SWGR-Win64-Shipping.exe", 0x0AE07F10, 0x450, 0x20, 0x338; // The current total time for a run (campaign or scenario) - updated at the end of each race
+
     //--- F. Front end / menus.  Every run-starting press is a flow edge (A0: the FrontEnd / Paddock machine goes away). M4 / M5 closed.
     // byte   medalResult         : ???;   // DEFERRED (M8)  Bronze beaten on the finished event. Not an MVP check — the moderator sees the medal. Only if runners ask.
 
@@ -122,7 +125,7 @@ startup
         settings.SetToolTip("Cat_TimeTrial",    "Single Arcade time trial (rolling start). Starts on the first start-line crossing; ends on the final-lap finish. Game Time = in-game time.");
     settings.Add("Cat_Precision",    false, "Arcade — Precision Driving", "Category");
         settings.SetToolTip("Cat_Precision",    "Single Precision Driving event. As Time Trial; Game Time already includes the 1.5 s gate deductions.");
-    // settings.Add("Cat_Podracing",    false, "Tales of Podracing",         "Category");
+    // settings.Add("Cat_Podracing",    false, "Arcade — Podracing",         "Category");
     //     settings.SetToolTip("Cat_Podracing",    "Single podracer race (grid start). Starts when the countdown ends; ends on the final-lap finish.");
 
     // Run-length categories: the timer starts the moment you leave the menu (any 'Start Event' / 'Start' / 'New Campaign' / reset 'Accept').
@@ -176,7 +179,6 @@ startup
     vars.EVENT_SEBULBA_FINAL   = "";   // FIND  the Sebulba race, last race of Act I (E4). "" = end condition can never fire
     vars.EVENT_KESTAR_FINAL    = "";   // FIND  the Kestar's Podracer race, last race of Act III (E5). "" = end condition can never fire
 
-    vars.PRECISION_GATE_SECONDS = 1.5; // The number of seconds a player's race time is reduced by in Precision Driving
 
     // Flow state machine (A0). Machine from the state-id enum's entry count (VERIFIED 2026-10-19); state ids from Griffin_enums.hpp.
     vars.FlowMachines = new Dictionary<int, string> { { 37, "Race" }, { 16, "FrontEnd" }, { 9, "Paddock" }, { 4, "PaddockNarrative" } };   // EPvpFlowState (>=14) not needed: singleplayer only
@@ -268,8 +270,6 @@ init
         vars.FinishEdge(p, n) && n.FinishIgt >= 0 && vars.InRace(n) && n.RaceStamp > 0
         && (vars.Run.DeadRaceStamp == 0.0 || n.RaceStamp != vars.Run.DeadRaceStamp));
 
-    // Player failed the event: Failed false -> true. Debug only — no reset policy uses it (an IL retry goes through R1).
-    vars.FailEdge = (Func<dynamic, dynamic, bool>)((p, n) => n.Failed && !p.Failed);
 
     // Race identity established: in race with a live RaceStamp we have not booked yet (and not the dead race's).
     // Arcade: fires at the first crossing (RaceStartTime is set there); grid events: at the countdown end. Drives OnRaceEntered.
@@ -311,25 +311,11 @@ init
     // Running event IGT (Precision-adjusted): hudEventTime.
     vars.EventIgt = (Func<dynamic, double>)((s) => (double)s.hudEventTime);
 
-    // Running raw lap time: hudLapTime.
-    vars.LapIgt = (Func<dynamic, double>)((s) => (double)s.hudLapTime);
 
-    // Exact elapsed race time at the last crossing: LapStamp - RaceStamp. RaceStamp = first-crossing stamp (Arcade) or countdown end (grid).
-    // Raw: the stamps know nothing about Precision gate deductions (Precision's gameTime{} uses hudEventTime instead).
-    vars.LapSplitIgt = (Func<dynamic, double>)((s) => (double)s.LapStamp - (double)s.RaceStamp);
 
     // Final adjusted time: finishTime (-1 before the finish). Precision: gate deductions already applied.
     vars.FinishIgt = (Func<dynamic, double>)((s) => (double)s.finishTime);
 
-    // Final unadjusted time: finishTime + bonusTime.
-    vars.RawFinishIgt = (Func<dynamic, double>)((s) => (double)s.finishTime + (double)s.bonusTime);
-
-    // Precision gates driven through: round(bonusTime / PRECISION_GATE_SECONDS).
-    vars.GatesHit = (Func<dynamic, int>)((s) => (int)Math.Round((double)s.bonusTime / vars.PRECISION_GATE_SECONDS));
-
-    // Game Time for the whole run: Run.IgtTotal + (InRace ? EventIgt : 0). Covers ILs (IgtTotal = 0) and multi-race runs with one formula.
-    // Defined for Debug / step 8; gameTime{} still runs on real time + stamp re-sync (v0.4.1 behaviour).
-    vars.RunGameTime = (Func<dynamic, double>)((s) => (double)vars.Run.IgtTotal + (s.InRace && !s.Finished ? vars.EventIgt(s) : 0.0));
 
     //--- 3d. Identity ("which race / event is this?")
 
@@ -397,6 +383,7 @@ init
         s.arcadeCategory     = c.arcadeCategory;
         s.skipCountdown      = c.skipCountdown;
         s.stageLapCount      = c.stageLapCount;
+        s.currentRunTime      = c.currentRunTime;
         // s.authoredEvent   = c.authoredEvent;        // LEAD
         // s.playingPrologue = c.playingPrologue;      // VERIFIED field / FIND chain (M1, M2)
         // s.activeRun       = c.activeRun;            // VERIFIED field / FIND chain (M3)
@@ -434,11 +421,8 @@ init
         s.IsLastStage  = vars.IsLastStage(s);
 
         //--- derived: timing
-        s.LapIgt       = vars.LapIgt(s);
         s.EventIgt     = vars.EventIgt(s);
         s.FinishIgt    = vars.FinishIgt(s);                                                   // HAVE   -1 before the finish
-        s.GateBonus    = (double)c.bonusTime;
-        s.GatesHit     = vars.GatesHit(s);
         s.RaceStamp    = (double)c.raceStartTime;                                             // HAVE   identity of this race instance
         s.LapStamp     = (double)c.lapStartServerTime;                                        // HAVE
 
@@ -493,7 +477,7 @@ init
         vars.Run.IgtTotal   += n.FinishIgt;
         vars.Run.EventsDone += 1;
         vars.Log("race finished: " + n.EventId + "  FinishIgt " + n.FinishIgt + "  IgtTotal " + vars.Run.IgtTotal
-                 + "  EventsDone " + vars.Run.EventsDone + "  (stamp - RaceStamp " + (n.LapStamp - n.RaceStamp) + ", raw " + vars.RawFinishIgt(n) + ", gates " + n.GatesHit + ")");
+                 + "  EventsDone " + vars.Run.EventsDone + "  (stamp - RaceStamp " + (n.LapStamp - n.RaceStamp));
     });
 
     //=================================================================================================================================================================================================
@@ -596,7 +580,7 @@ update
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-// isLoading{}: true freezes Game Time. With RunGameTime driving Game Time this is simply "not in a live race, or already finished" (REFACTOR.md "Invariants").
+// isLoading{}: true freezes Game Time.
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 isLoading
 {
@@ -629,29 +613,25 @@ gameTime
         return TimeSpan.FromSeconds(run.IgtTotal);
     }
 
-    // Precision Driving ONLY (BUGS.md #7): Game Time IS the HUD's CurrentEventTime, every tick. The crossing stamps are raw but this value already
-    // has the 1.5 s gate deductions taken off as each gate is passed, so lap splits, the live display and pauses all come out right for free.
-    // (Tested 2026-10-22.) The shared v0.4.1 lap-edge block below is not reached.
-    if (settings["Cat_Precision"])
+    // In Time Trial and Precision Driving, as IL runs, we only care about what the current event time is.
+    if (settings["Cat_Precision"] || settings["Cat_TimeTrial"])
     {
         return TimeSpan.FromSeconds(n.hudEventTime);
     }
 
-    // Lap crossings (v0.4.1): the game stamps LapStartServerTime at the crossing, so stamp - RaceStartTime is the exact elapsed race time
-    // (RaceStartTime = first-crossing stamp in Arcade, countdown end in grid events). Re-syncs the live Game Time and makes the lap split exact.
-    // Only on a tick where the stamp actually moved, and only if within 0.5 s of the running Game Time (garbage guard).
-    if (vars.LapEdge(p, n) && n.LapStamp != p.LapStamp)
+    // Scenarios: The scored time is the total of all the race's IGT segments
+    if (settings["Cat_Scenarios"])
     {
-        double lapElapsed = run.IgtTotal + vars.LapSplitIgt(n);
-        double running = timer.CurrentTime.GameTime.HasValue ? timer.CurrentTime.GameTime.Value.TotalSeconds : -1;
-        vars.Log("lap edge: IgtTotal + (stamp - RaceStamp) " + lapElapsed + "  running Game Time " + running + "  correction " + (lapElapsed - running));
-        if (vars.LapSplitIgt(n) > 0 && Math.Abs(lapElapsed - running) < 0.5)
-            return TimeSpan.FromSeconds(lapElapsed);
+        // If the player is currently in a race and hasn't finished, add the HUD's current event time to the total IGT for the run.
+        if (n.InRace && !n.Finished){
+            return TimeSpan.FromSeconds(n.hudEventTime + run.IgtTotal);
+        }
+        // Otherwise, return the total IGT for the run.
+        return TimeSpan.FromSeconds(run.IgtTotal);
     }
 
-    // TODO(step8): live — return TimeSpan.FromSeconds(vars.RunGameTime(n)) every tick for the other categories too; hudEventTime is live and smooth
-    // in Precision (above), so the same would remove the real-time jitter between crossings everywhere (BUGS.md #1).
-    return null;   // real time between crossings (v0.4.1 behaviour)
+
+    return null;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
