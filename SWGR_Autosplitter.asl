@@ -1,57 +1,37 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter
-// Version: 0.5.0-dev  — Time Trial, Precision Driving and Scenarios tested in LiveSplit (2026-10-22). Arcade% and the campaign categories
-//                       are wired (start on leaving the menu, split on every finish, end on a named event) but untested; the campaign end
-//                       events still need their names (vars.EVENT_*). Will replace SWGR_Autosplitter.asl (v0.4.1) when finished.
-//
-// READ FIRST
-//   REFACTOR.md       — design notes, the S/E/R catalogue, invariants, remaining work.
-//   MEMORY_OFFSETS.md — every address. Offsets are for the current Steam build (GWorld = exe+0x0AE0C968) and WILL break on game patches.
-//   DEV_NOTES.md      — game behaviour, enums, the mods' rules, open items.
-//   BUGS.md           — ...bugs.
-//
-// SHAPE
-//   state{}   the readings the script uses — nothing speculative. Readings that were verified but have no consumer live in MEMORY_OFFSETS.md.
-//   startup{} settings and the category table (family, start edge, end event, what splits).
-//   init{}    a few lambdas over `current` / `old` (gates and edges) and the run state (phase, IGT total, dead-race stamps).
-//   update{}  category selection, dead-stamp capture, IGT bookkeeping on every valid finish, Debug output.
-//   isLoading / gameTime / start / split / reset  read `current`, `old`, the lambdas, the run state and the selected category.
-//
-// ASL facts: a reading whose chain fails reads as 0/default, not an error; update{} runs first on a tick, then isLoading{}, gameTime{},
-// start{}/split{}/reset{}; a returned gameTime{} value is applied even while isLoading{} is true; settings are checkboxes (no radio buttons).
+// Version: 0.5.0  — Time Trial, Precision Driving and Scenarios tested in LiveSplit (2026-10-22)
 //=====================================================================================================================================================================================================
 
 
 //=====================================================================================================================================================================================================
-// READINGS  (MEMORY_OFFSETS.md)
+// READINGS
 //=====================================================================================================================================================================================================
 state("SWGR-Win64-Shipping")
 {
     //--- Flow state machine  (GameState -> AActor.BlueprintCreatedComponents[0] = UGameFlowStateMachineComponent -> ActiveStateMachines[0]).
-    //    EVERY GameState carries one: the race machine in a race, the front-end machine in the menus, the paddock machine in the campaign hub.
-    //    flowState alone is ambiguous (Paddock Leaving 5 == race Racing 5): always pair it with flowEnumCount, which identifies the machine.
-    //    Both read 0 through a level load (GameState destroyed) — that is the "None" machine and it is expected.
-    int    flowState        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC0, 0x10;        // CurrentStateId — id in the machine's own enum (DEV_NOTES "Flow state machine")
-    int    flowEnumCount    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC0, 0x8, 0x50;   // StateMachineStateIdEnum->Names.Num: 37 race, 16 front end, 9 paddock, 4 paddock narrative, 0 = loading
+    //    Both read 0 through a level load (GameState destroyed)
+    int    flowState        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC0, 0x10;        // CurrentStateId — id in the machine's own enum
+    int    flowEnumCount    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC0, 0x8, 0x50;   // StateMachineStateIdEnum->Names.Num
 
     //--- ARacingGameState  (GWorld -> GameState). Only an ARacingGameState in a race; garbage otherwise, hence the InRace gate.
-    byte   raceStarted      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x388;   // bIsRaceStarted: 0 -> 1 when the grid is released (countdown over). May never be set in Arcade rolling starts
+    byte   raceStarted      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x388;   // bIsRaceStarted: 0 -> 1 when the grid is released (countdown over).
     int    totalLaps        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x370;   // LapCount: laps in this event. Elimination (campaign) events read 100
-    double raceStartTime    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x378;   // RaceStartTime (server time): -1 before the start; identity of this race instance (dead-race guard)
+    double raceStartTime    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x378;   // RaceStartTime (server time): -1 before the start;
 
     //--- URaceEventVM  (HUD view model: GameState + 0x3D8). Pointer is 0 / chain breaks once the player leaves the race.
     long   hudVM            : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8;          // presence == HUD exists
     int    hudLap           : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x16C;   // CurrentLapNumber as shown on HUD: starts at 1
-    double hudEventTime     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x188;   // CurrentEventTime: running event IGT, Precision gate deductions already applied. Live Game Time
+    double hudEventTime     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x188;   // CurrentEventTime: running event IGT
 
     //--- UPlayerRaceEventComponent  (GWorld -> OwningGameInstance -> LocalPlayers[0] -> PlayerController -> PlayerState -> RaceEventComponent)
     int    playerLap          : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // CurrentLapNumber: 0 until first crossing; LapCount+1 after the finish; 0 after leaving
-    byte   finished           : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing. End trigger for EVERY category
-    float  finishTime         : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime: -1 until the finish, then the results-screen time (Precision: already adjusted)
-    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: stamp at each crossing (dead-race guard for crossing starts)
+    byte   finished           : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing.
+    float  finishTime         : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime: -1 until the finish, then the results-screen time
+    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: stamp at each crossing
 
     //--- Event identity  (GameState + 0x3F8 EventRecipe.EventStages -> FRaceEventInstance[0].InternalName, UTF-16).
-    //    Arcade "EVT_ARC_TT_CAR_WHP_A_FWD"; campaign "DAL_SHORT_06_TeamRace_Dry". Compared against the category's end event. Stage 0 only (state{} can't index).
+    //    Arcade "EVT_ARC_TT_CAR_WHP_A_FWD"; campaign "DAL_SHORT_06_TeamRace_Dry".
     string128 stageName     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x10, 0x0;
 }
 
