@@ -74,20 +74,20 @@ startup
     // Run-length categories: several races in one run. Never auto-reset. Game Time = sum of the races' in-game times.
     settings.Add("Cat_Scenarios",    false, "Arcade Scenarios",           "Category");
         settings.SetToolTip("Cat_Scenarios",    "5 races in sequence. IGT: Game Time runs only during a live race (countdowns, loads and menus between races are not counted). Never auto-resets.");
-    settings.Add("Cat_ArcadePct",    false, "Arcade%",                    "Category");
-        settings.SetToolTip("Cat_ArcadePct",    "All events in order. RTA. Starts when you leave the menu; splits on every finish (a redone event splits again — skip or undo the split yourself); ends on The Experiment's finish. Never auto-resets.");
-    settings.Add("Cat_SebulbaPct",   false, "Sebulba%",                   "Category");
-        settings.SetToolTip("Cat_SebulbaPct",   "Fresh save. RTA. Starts when you leave the menu ('Start New Campaign'); ends on the final-lap finish vs Sebulba (last race of Act I).");
-    settings.Add("Cat_AnyPct",       false, "Any%",                       "Category");
-        settings.SetToolTip("Cat_AnyPct",       "Fresh save. RTA. Starts when you leave the menu ('Start New Campaign'); ends on the final-lap finish vs Kestar's Podracer (last race of Act III).");
-    settings.Add("Cat_NGSebulbaPct", false, "NG+ Sebulba%",               "Category");
-        settings.SetToolTip("Cat_NGSebulbaPct", "RTA. Starts when you leave the menu (campaign-reset 'Accept'); ends vs Sebulba.");
-    settings.Add("Cat_NGAnyPct",     false, "NG+ Any%",                   "Category");
-        settings.SetToolTip("Cat_NGAnyPct",     "RTA. Starts when you leave the menu (campaign-reset 'Accept'); ends vs Kestar's Podracer.");
-    settings.Add("Cat_NGChampion",   false, "NG+ Champion%",              "Category");
-        settings.SetToolTip("Cat_NGChampion",   "As NG+ Any% on Champion difficulty (not checked by the script).");
-    settings.Add("Cat_NGActIII",     false, "NG+ Act III",                "Category");
-        settings.SetToolTip("Cat_NGActIII",     "RTA. Starts on 'Start Run' at the Act III loadout check (paddock CampaignSetup -> InWorld); ends vs Kestar's Podracer.");
+    // settings.Add("Cat_ArcadePct",    false, "Arcade%",                    "Category");
+    //     settings.SetToolTip("Cat_ArcadePct",    "All events in order. RTA. Starts when you leave the menu; splits on every finish (a redone event splits again — skip or undo the split yourself); ends on The Experiment's finish. Never auto-resets.");
+    // settings.Add("Cat_SebulbaPct",   false, "Sebulba%",                   "Category");
+    //     settings.SetToolTip("Cat_SebulbaPct",   "Fresh save. RTA. Starts when you leave the menu ('Start New Campaign'); ends on the final-lap finish vs Sebulba (last race of Act I).");
+    // settings.Add("Cat_AnyPct",       false, "Any%",                       "Category");
+    //     settings.SetToolTip("Cat_AnyPct",       "Fresh save. RTA. Starts when you leave the menu ('Start New Campaign'); ends on the final-lap finish vs Kestar's Podracer (last race of Act III).");
+    // settings.Add("Cat_NGSebulbaPct", false, "NG+ Sebulba%",               "Category");
+    //     settings.SetToolTip("Cat_NGSebulbaPct", "RTA. Starts when you leave the menu (campaign-reset 'Accept'); ends vs Sebulba.");
+    // settings.Add("Cat_NGAnyPct",     false, "NG+ Any%",                   "Category");
+    //     settings.SetToolTip("Cat_NGAnyPct",     "RTA. Starts when you leave the menu (campaign-reset 'Accept'); ends vs Kestar's Podracer.");
+    // settings.Add("Cat_NGChampion",   false, "NG+ Champion%",              "Category");
+    //     settings.SetToolTip("Cat_NGChampion",   "As NG+ Any% on Champion difficulty (not checked by the script).");
+    // settings.Add("Cat_NGActIII",     false, "NG+ Act III",                "Category");
+    //     settings.SetToolTip("Cat_NGActIII",     "RTA. Starts on 'Start Run' at the Act III loadout check (paddock CampaignSetup -> InWorld); ends vs Kestar's Podracer.");
 
     //--- Splits
     settings.Add("LapSplits",   true,  "Split on each lap");
@@ -116,8 +116,8 @@ startup
     //    Start    "Crossing" first start-line crossing (S1) | "GridGo" grid released (S2) | "MenuLeave" left the menu (S3) | "ActIII" Act III Start Run (S4)
     //    EndEvent Run family only: event name that ends the run, "" = never (the runner's split count ends it). IL always ends on the finish.
     vars.Categories = new List<string> {
-        "Cat_TimeTrial", "Cat_Precision", /*"Cat_Podracing",*/ "Cat_Scenarios", "Cat_ArcadePct",
-        "Cat_SebulbaPct", "Cat_AnyPct", "Cat_NGSebulbaPct", "Cat_NGAnyPct", "Cat_NGChampion", "Cat_NGActIII"
+        "Cat_TimeTrial", "Cat_Precision", /*"Cat_Podracing",*/ "Cat_Scenarios",
+        // "Cat_ArcadePct", "Cat_SebulbaPct", "Cat_AnyPct", "Cat_NGSebulbaPct", "Cat_NGAnyPct", "Cat_NGChampion", "Cat_NGActIII"
     };
     vars.MakeCat = (Func<string, string, string, bool, bool, dynamic>)((family, start, endEvent, lapSplits, raceSplits) =>
     {
@@ -131,13 +131,13 @@ startup
     vars.CatTable["Cat_Precision"]    = vars.MakeCat("IL",  "Crossing",  "",                         true,  false);
     // vars.CatTable["Cat_Podracing"]    = vars.MakeCat("IL",  "GridGo",    "",                         true,  false);
     vars.CatTable["Cat_Scenarios"]    = vars.MakeCat("Run", "GridGo",    "",                         true,  true);
-    vars.CatTable["Cat_ArcadePct"]    = vars.MakeCat("Run", "MenuLeave", vars.EVENT_THE_EXPERIMENT,  false, true);
-    vars.CatTable["Cat_SebulbaPct"]   = vars.MakeCat("Run", "MenuLeave", vars.EVENT_SEBULBA_FINAL,   false, true);
-    vars.CatTable["Cat_AnyPct"]       = vars.MakeCat("Run", "MenuLeave", vars.EVENT_KESTAR_FINAL,    false, true);
-    vars.CatTable["Cat_NGSebulbaPct"] = vars.MakeCat("Run", "MenuLeave", vars.EVENT_SEBULBA_FINAL,   false, true);
-    vars.CatTable["Cat_NGAnyPct"]     = vars.MakeCat("Run", "MenuLeave", vars.EVENT_KESTAR_FINAL,    false, true);
-    vars.CatTable["Cat_NGChampion"]   = vars.MakeCat("Run", "MenuLeave", vars.EVENT_KESTAR_FINAL,    false, true);
-    vars.CatTable["Cat_NGActIII"]     = vars.MakeCat("Run", "ActIII",    vars.EVENT_KESTAR_FINAL,    false, true);
+    // vars.CatTable["Cat_ArcadePct"]    = vars.MakeCat("Run", "MenuLeave", vars.EVENT_THE_EXPERIMENT,  false, true);
+    // vars.CatTable["Cat_SebulbaPct"]   = vars.MakeCat("Run", "MenuLeave", vars.EVENT_SEBULBA_FINAL,   false, true);
+    // vars.CatTable["Cat_AnyPct"]       = vars.MakeCat("Run", "MenuLeave", vars.EVENT_KESTAR_FINAL,    false, true);
+    // vars.CatTable["Cat_NGSebulbaPct"] = vars.MakeCat("Run", "MenuLeave", vars.EVENT_SEBULBA_FINAL,   false, true);
+    // vars.CatTable["Cat_NGAnyPct"]     = vars.MakeCat("Run", "MenuLeave", vars.EVENT_KESTAR_FINAL,    false, true);
+    // vars.CatTable["Cat_NGChampion"]   = vars.MakeCat("Run", "MenuLeave", vars.EVENT_KESTAR_FINAL,    false, true);
+    // vars.CatTable["Cat_NGActIII"]     = vars.MakeCat("Run", "ActIII",    vars.EVENT_KESTAR_FINAL,    false, true);
 
     //--- Flow machines (by state-id enum entry count) and the state ids the script uses (Griffin_enums.hpp; DEV_NOTES "Flow state machine").
     vars.FlowMachines = new Dictionary<int, string> { { 37, "Race" }, { 16, "FrontEnd" }, { 9, "Paddock" }, { 4, "PaddockNarrative" } };
