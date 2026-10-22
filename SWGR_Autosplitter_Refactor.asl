@@ -692,8 +692,7 @@ split
     // E#: the run is over.
     if (run.Profile.IsEnd(p, n)) { run.Phase = "Done"; vars.Log("END (" + run.Profile.Name + ")  IgtTotal " + run.IgtTotal + "  EventsDone " + run.EventsDone); return settings["FinishSplit"]; }
 
-    // Race / event split: every valid finish that isn't the end. No medal / fail / redo check: a finish is a finish (the runner skips or undoes a split
-    // for a redone event). EventId can't tell races apart anyway — the Nik Skandaro scenario's five races share one.
+    // Race / event split: every valid finish that isn't the end.
     if (run.Profile.SplitOnRace && vars.ValidFinishEdge(p, n)) return settings["RaceSplits"];
 
     // Lap split: lap k -> k+1 for 1 <= k < totalLaps (0 -> 1 is the start crossing; totalLaps -> totalLaps+1 is the finish, handled above).
@@ -712,15 +711,13 @@ reset
 
     if (run.Profile.Family == "IL")
     {
-        // R1 / R2: v0.4.1 reset conditions, verbatim. (The flow-based IsTearingDown is deliberately not used here — IL behaviour stays identical.)
         if (!settings["ResetOnLeave"]) return false;
         if (p.HudVmPresent && !n.HudVmPresent)                      { vars.Log("RESET: HUD VM gone");                 return true; }   // player left the race
         if (p.raceStarted == 1 && n.raceStarted == 0)               { vars.Log("RESET: raceStarted 1 -> 0");          return true; }   // race restarted in place
         if (p.playerLap >= 1 && n.playerLap == 0 && !n.Finished)    { vars.Log("RESET: playerLap " + p.playerLap + " -> 0"); return true; }   // covers Arcade restarts, where bIsRaceStarted may never be set
         return false;
     }
-    // "Run": R3 — never. Teardowns between events, a trip back to the main menu, a wrong first event, a failed race: all the runner's call.
-    // The script never takes a running timer away from a run-length runner (REFACTOR.md "What the script is for").
+
     return false;
 }
 
