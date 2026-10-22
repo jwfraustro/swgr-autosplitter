@@ -30,20 +30,22 @@ stays in both families; that is not policing.
 
 ## Shape
 
-Five layers, each only talking to the one below: readings (`state{}`) → snapshot (`vars.Now` /
-`vars.Prev`, every derived value computed once per tick in `update{}`) → pure predicates and
-edges (`vars.*` lambdas) → run state (`vars.Run`, persists across ticks and races) → category
-profiles (one record per speedrun.com category: family, start edge, end condition, what splits).
-Action blocks read only the snapshot, the run state and the profile, never `current` / `old`.
+v0.4.1 plus what the extra categories need, and nothing speculative (stripped 2026-10-22; the
+earlier five-layer snapshot / predicate / profile version is in git history). `state{}` holds
+the 13 readings the script uses; a few `vars.*` lambdas over `current` / `old` express the gates
+(`InRace`, `RaceLive`, `InMenu`) and edges (S1–S4, lap, finish, `ValidFinishEdge`); run state
+is four values (`Phase`, `IgtTotal`, the two dead-race stamps); the category table
+(`vars.CatTable`) gives each category a family, a start edge name, an end event and which
+splits it uses. Action blocks read `current` / `old`, the lambdas, the run state and `vars.Cat`.
 
 Decisions behind it:
 
 - The runner picks the category explicitly. No auto-detection: it would need an identity layer
   to save one click, and a mismatch would be another way to not start.
-- A broken chain reads 0, not an error, so presence is its own bool (`HudVmPresent`) wherever 0
-  is also a legal value.
-- `Phase` is only Idle / Running / Done. Where the game is comes from `Flow`, not a mirrored
-  phase.
+- `Phase` is only Idle / Running / Done. Where the game is comes from the readings, not a
+  mirrored phase.
+- A reading earns its place by having a consumer in an action block or an edge. Verified
+  addresses without one live in `MEMORY_OFFSETS.md`, not in `state{}`.
 - Readings are the only layer that changes on a game patch. Versioned `state("…", "<build>")`
   blocks slot in there when needed.
 
@@ -94,34 +96,31 @@ Dead-stamp capture runs on every teardown in both families.
 
 ## Invariants (what a future edit must not break)
 
-- `update{}` order: `SelectProfile` → `CaptureDeadStamps` → `OnRaceEntered` → `OnRaceFinished`.
-  `update{}` runs before `gameTime{}` and `split{}`, which both rely on the bookkeeping already
-  having happened on the finish tick.
-- `OnRaceFinished` owns the `IgtTotal` add; `gameTime{}` returns the total on the finish tick
-  and must not add again. Every valid finish adds its IGT, redo or not (the IGT column is
-  driving time; if the mods want only the counting attempt it is a one-line change there).
-- No redo detection (dropped 2026-10-21). It compared `EventId` against the last finished
-  event, and `EventId` is not a race identity: the Nik Skandaro scenario's five races share
+- `update{}` order: select category → capture dead stamps → add `finishTime` to `IgtTotal` on
+  every `ValidFinishEdge`. `update{}` runs before `gameTime{}` and `split{}`, which both rely on
+  the bookkeeping already having happened on the finish tick.
+- `update{}` owns the `IgtTotal` add; `gameTime{}` returns the total on the finish tick and must
+  not add again. Every valid finish adds its IGT, redo or not (the IGT column is driving time;
+  if the mods want only the counting attempt it is a one-line change there).
+- No redo detection (dropped 2026-10-21). It compared the stage name against the last finished
+  event, and the stage name is not a race identity: the Nik Skandaro scenario's five races share
   one, so race two never split. Every valid finish splits; a runner who redoes an event skips
   or undoes the split. The margins in a scenario make a redo a restart anyway.
-- Once a run-length profile's end has fired (`Phase == Done`) nothing else splits.
-- IL `reset{}` keeps the raw v0.4.1 conditions, not the flow-based `IsTearingDown`, so IL
-  behaviour stays bit-for-bit. Likewise `InRace` stays `HudVmPresent && LapsSane`; the flow
-  machine is a Debug cross-check for ILs, not a replacement (the crossing-based ILs must not
-  change behaviour).
-- `gameTime{}` between crossings is real time, re-synced to the stamps on lap edges (within a
-  0.5 s garbage guard) and snapped to `EventFinishTime` on the finish. Precision Driving is the
-  exception: its branch returns the HUD's `CurrentEventTime` every tick, which already carries
-  the gate deductions (BUGS.md #7). The shared block stays v0.4.1 verbatim.
-- Category-specific behaviour goes in an explicit branch for that category (as the Precision
-  one), not into the shared path via a field that "happens to be 0 elsewhere" or a profile flag
-  only one row uses. An empty end-event
-  constant never matches, so an unfilled E4/E5 can't end a run.
+- Once a run-length category's end has fired (`Phase == Done`) nothing else splits.
+- IL `reset{}` keeps the raw v0.4.1 conditions, and `InRace` stays `hudVM != 0 && LapsSane`.
+  The flow readings exist only for the menu-leave and Act III starts; nothing IL reads them.
+- `gameTime{}` is the game's own time every tick: `hudEventTime` for an IL (Precision's gate
+  deductions are already in it, BUGS.md #7), `IgtTotal + hudEventTime` while a run-length race
+  is live and `IgtTotal` otherwise, snapped to `IgtTotal` on the finish tick and left alone
+  after it. No real-time running, no lap-edge re-sync.
+- Category-specific behaviour goes in an explicit branch for that category, not into the shared
+  path via a field that "happens to be 0 elsewhere" or a table flag only one row uses. An empty
+  end-event constant never matches, so an unfilled E4/E5 can't end a run.
 - `isLoading{}`: ILs freeze only after the finish (a one-tick freeze at the Arcade start would be
-  a behaviour change); run-length also freezes whenever not in a *live* race: HUD present and
-  either `raceStarted` (grid events) or `playerLap >= 1` (rolling starts). The grid countdown
-  is not live; timing it would have put every scenario race's IGT off by the countdown, and the
-  lap-edge re-sync's 0.5 s guard would have refused the correction.
+  a behaviour change); run-length also freezes whenever the race is not *live* (`RaceLive`: in
+  race, not finished, and either `raceStarted` for grid events or `playerLap >= 1` for rolling
+  starts). The grid countdown is not live; timing it would put every scenario race's IGT off by
+  the countdown.
 - Campaign splits: the only must-split is the end condition. Per-planet or per-event splits are
   a route question; leave until someone asks.
 
@@ -141,7 +140,7 @@ What it changes:
    run-length (no auto-reset, `isLoading` outside a live race). The once-per-event redo
    dedupe went with it (see Invariants): scenario races share an `EventId`.
    Deferred: how the game's own scenario time treats a redone race. Today a redone race *adds*
-   its time to `IgtTotal`; if the game shows last-attempt-per-race, `OnRaceFinished` would have
+   its time to `IgtTotal`; if the game shows last-attempt-per-race, the finish bookkeeping in `update{}` would have
    to *replace* that `EventId`'s entry (a per-event dictionary instead of a running sum). Not
    worth settling until a runner reports a mismatch; the submitted time comes from the game's
    screen either way.
@@ -158,20 +157,18 @@ What it changes:
 
 ## Status and remaining work
 
-Steps 1–5 landed 2026-10-19/20 (snapshot, edges, run state, IL profiles, run-length family),
-**untested in LiveSplit**. Intended differences from v0.4.1 and nothing else: `LapsSane` accepts
-100 laps (BUGS.md #3); with ResetOnLeave off and the timer reused across races, Game Time is the
-IGT sum rather than the last race's time.
+Time Trial, Precision Driving and Scenarios verified in LiveSplit 2026-10-22. Stripped to the
+v0.4.1 shape the same day (see "Shape"); behaviour unchanged for those three. Intended
+differences from v0.4.1: `LapsSane` accepts 100 laps (BUGS.md #3); Game Time is the HUD's own
+event time every tick rather than real time re-synced on lap edges.
 
-- [ ] Test in LiveSplit, ILs first (must match v0.4.1), then Arcade%: Landspeeder Ace, then skip
-      to The Experiment. Confirm ASL `string128` reads the UTF-16 `stageName` correctly.
-- [ ] Test a Scenario: timer starts on race 1's go (not the countdown), Game Time holds through
-      each load and the next countdown, lap and finish splits every race, nothing after the
-      runner's last split.
+- [ ] Re-check the three verified categories after the strip-down (same script, fewer lines).
+- [ ] Test Arcade%: Landspeeder Ace, then skip to The Experiment. Confirm ASL `string128` reads
+      the UTF-16 `stageName` correctly.
 - [ ] Step 6: fill `EVENT_SEBULBA_FINAL` / `EVENT_KESTAR_FINAL` once the names are found.
 - [ ] S4: record whether Act III "Start Run" goes 2→3→4 or 2→4 (both are handled).
-- [ ] Step 7, only if wanted: live `EventIgt` as in-race Game Time for the other categories
-      (Precision already does it and `hudEventTime` is smooth; it would also give pause
-      handling for free, so `IsPaused` is probably moot), versioned `state` blocks for patches,
-      `EventKind` mismatch warning, medal check on E3.
-- Mock testing harness: `testing/` (`swgr_mock.py`, `test_time_trial.py`, `run.py`).
+- [ ] Campaign: a "split only on the final event" layout (one split, start and stop) is the
+      bare minimum; `RaceSplits` off already gives it once the end names are in.
+- [ ] Only if wanted: versioned `state` blocks for patches, medal check on E3.
+- Mock testing harness: `testing/` (`swgr_mock.py`, `test_time_trial.py`, `run.py`) — drives
+  memory, not the script's internals, so it is unaffected by the strip-down.
