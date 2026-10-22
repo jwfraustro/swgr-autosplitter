@@ -14,6 +14,7 @@ Thumbs.db
 desktop.ini
 
 # Cheat Engine pointermaps, pointer files, etc.
+cheat_engine_resources/
 *.ptr
 *.ptrmap
 *.ct
