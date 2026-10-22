@@ -2,25 +2,29 @@
 // Star Wars: Galactic Racer — LiveSplit autosplitter
 // Version: 0.4.1 (IL / single race only — Arcade vs Race start modes; Game Time from the game's own lap/finish stamps)
 //
-// Offsets are for the current Steam build (GWorld = exe+0xADFF928) and WILL break on game patches.
 // See NOTES.md for where each value comes from and how it was verified.
 //=====================================================================================================================================================================================================
 state("SWGR-Win64-Shipping")
 {
+
+    // Release build offset for GWorld: 0xADFF928 -- add a state for me later.
+    // BUILD: CL386500 V38591600 -- 0x0AE0C968
+
+
     // ARacingGameState (GWorld -> GameState)
-    byte   raceStarted : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388;   // bIsRaceStarted: 0 -> 1 when the race goes (countdown over)
-    int    totalLaps   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370;   // LapCount: laps in this event
-    double raceStartTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378; // RaceStartTime (server time): base for lap-split Game Time
+    byte   raceStarted : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x388;   // bIsRaceStarted: 0 -> 1 when the race goes (countdown over)
+    int    totalLaps   : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x370;   // LapCount: laps in this event
+    double raceStartTime : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x378; // RaceStartTime (server time): base for lap-split Game Time
 
     // URaceEventVM (HUD view model, GameState +0x3D8). Pointer is 0 / chain breaks once the player leaves the race.
-    long   hudVM       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8;
-    int    hudLap      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x16C; // CurrentLapNumber as shown on HUD: starts at 1
+    long   hudVM       : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8;
+    int    hudLap      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x16C; // CurrentLapNumber as shown on HUD: starts at 1
 
     // UPlayerRaceEventComponent (GWorld -> OwningGameInstance -> LocalPlayers[0] -> PlayerController -> PlayerState -> RaceEventComponent)
-    int    playerLap   : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // 0 until first line crossing; LapCount+1 after the finish, CurrentLapNumber
-    byte   finished    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing
-    float  finishTime  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime: -1 until the finish, then the results-screen time (drives Game Time)
-    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: server time of the last line crossing (lap-split Game Time)
+    int    playerLap   : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // 0 until first line crossing; LapCount+1 after the finish, CurrentLapNumber
+    byte   finished    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // bHasFinishedEvent: 0 -> 1 on the final crossing
+    float  finishTime  : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // EventFinishTime: -1 until the finish, then the results-screen time (drives Game Time)
+    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // LapStartServerTime: server time of the last line crossing (lap-split Game Time)
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 startup
