@@ -9,7 +9,7 @@
 //
 // READ FIRST
 //   REFACTOR.md       — design rationale, the S/E/R catalogue, invariants, remaining work.
-//   MEMORY_OFFSETS.md — every address. Offsets are for the current Steam build (GWorld = exe+0xADFF928) and WILL break on game patches.
+//   MEMORY_OFFSETS.md — every address. Offsets are for the current Steam build (GWorld = exe+0x0AE0C968) and WILL break on game patches.
 //   DEV_NOTES.md      — game behaviour, enums, the mods' rules, open items.
 //   BUGS.md       — ...bugs.
 //   SWGR_Autosplitter.asl — the working v0.4.1 script. Port behaviour from there, don't reinvent it.
@@ -41,59 +41,59 @@
 //=====================================================================================================================================================================================================
 state("SWGR-Win64-Shipping")
 {
-    //--- A0. Flow state machine  (GameState -> AActor.BlueprintCreatedComponents[0] = UGameFlowStateMachineComponent: exe, 0xADFF928, 0x1B0, 0x298, 0x0).
+    //--- A0. Flow state machine  (GameState -> AActor.BlueprintCreatedComponents[0] = UGameFlowStateMachineComponent: exe, 0x0AE0C968, 0x1B0, 0x298, 0x0).
     //    EVERY GameState carries it: USimpleRaceStateMachine in a race, UFrontEndStateMachine in the menus, UPaddockStateMachine in the campaign hub.
     //    flowState alone is ambiguous (Paddock Leaving 5 == race Racing 5): always pair it with flowEnumCount, which identifies the machine.
     //    Chain reads 0 through a level load (GameState destroyed) — that is the "None" machine, and it is expected, not an error.
-    int    flowState        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0, 0xC0, 0x10;        // VERIFIED  ActiveStateMachines[0].CurrentStateId — id in the machine's own enum (DEV_NOTES "Flow state machine")
-    int    flowEnumCount    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0, 0xC0, 0x8, 0x50;   // VERIFIED  ActiveStateMachines[0].StateMachineStateIdEnum->Names.Num: 37 race, 16 front end, 9 paddock, 4 paddock narrative, >=14 pvp, 0 = loading
-    int    flowRecordCount  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x298, 0x0, 0xC8;              // VERIFIED (field)  ActiveStateMachines.Num — expect 1; Debug warning if ever 2 (record 0 may then be the wrong machine)
-    // byte   primaryFlow      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x398;                         // LEAD  UGfnGameInstance.PrimaryFlow (EGfnPrimaryFlow): Campaign 1, QuickRace 2, Arcade 3, Multiplayer 4 — Debug only
+    int    flowState        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC0, 0x10;        // VERIFIED  ActiveStateMachines[0].CurrentStateId — id in the machine's own enum (DEV_NOTES "Flow state machine")
+    int    flowEnumCount    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC0, 0x8, 0x50;   // VERIFIED  ActiveStateMachines[0].StateMachineStateIdEnum->Names.Num: 37 race, 16 front end, 9 paddock, 4 paddock narrative, >=14 pvp, 0 = loading
+    int    flowRecordCount  : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x298, 0x0, 0xC8;              // VERIFIED (field)  ActiveStateMachines.Num — expect 1; Debug warning if ever 2 (record 0 may then be the wrong machine)
+    // byte   primaryFlow      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x398;                         // LEAD  UGfnGameInstance.PrimaryFlow (EGfnPrimaryFlow): Campaign 1, QuickRace 2, Arcade 3, Multiplayer 4 — Debug only
 
-    //--- A. ARacingGameState  (GWorld -> GameState: exe, 0xADFF928, 0x1B0). Only an ARacingGameState while FlowMachine == "Race"; garbage otherwise.
-    byte   raceStarted      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x388;   // HAVE  bIsRaceStarted: 0 -> 1 when the grid is released (countdown over)
-    int    totalLaps        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x370;   // HAVE  LapCount: laps in this event. Elimination (campaign) events read 100 = "until top 3 remain"
-    double raceStartTime    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x378;   // HAVE  RaceStartTime (server time): base for lap-split IGT; dead-race guard
-    byte   raceFinished     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x389;   // VERIFIED  bIsRaceFinished: player-based (local player's finish), not all racers
-    double countdownEndTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x368;   // VERIFIED  CountdownEndTime: server-time stamp on the RaceStartTime clock (e.g. 1670.018), not a 3.0 s countdown
-    int    activeStage      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x408;   // VERIFIED  EventRecipeState.ActiveStage: 0-indexed stage in the recipe (M9)
-    int    stageCount       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x400;   // VERIFIED  EventRecipe.EventStages.Num (TArray count = data ptr + 0x8) (M9)
+    //--- A. ARacingGameState  (GWorld -> GameState: exe, 0x0AE0C968, 0x1B0). Only an ARacingGameState while FlowMachine == "Race"; garbage otherwise.
+    byte   raceStarted      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x388;   // HAVE  bIsRaceStarted: 0 -> 1 when the grid is released (countdown over)
+    int    totalLaps        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x370;   // HAVE  LapCount: laps in this event. Elimination (campaign) events read 100 = "until top 3 remain"
+    double raceStartTime    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x378;   // HAVE  RaceStartTime (server time): base for lap-split IGT; dead-race guard
+    byte   raceFinished     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x389;   // VERIFIED  bIsRaceFinished: player-based (local player's finish), not all racers
+    double countdownEndTime : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x368;   // VERIFIED  CountdownEndTime: server-time stamp on the RaceStartTime clock (e.g. 1670.018), not a 3.0 s countdown
+    int    activeStage      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x408;   // VERIFIED  EventRecipeState.ActiveStage: 0-indexed stage in the recipe (M9)
+    int    stageCount       : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x400;   // VERIFIED  EventRecipe.EventStages.Num (TArray count = data ptr + 0x8) (M9)
 
     //--- B. URaceEventVM  (HUD view model: GameState + 0x3D8). Pointer is 0 / chain breaks once the player leaves the race.
-    long   hudVM            : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8;          // HAVE  presence == HUD exists
-    int    hudLap           : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x16C;   // HAVE  CurrentLapNumber as shown on HUD: starts at 1
-    double hudLapTime       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x178;   // VERIFIED  CurrentLapTime: raw lap IGT, resets each lap, no Precision deductions
-    double hudEventTime     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x188;   // VERIFIED  CurrentEventTime: running event IGT with Precision gate deductions applied
-    int    hudNumLaps       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x140;   // VERIFIED  NumLaps: matches totalLaps; 100 in Elimination events (hidden on the HUD)
-    byte   hudModeType      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x0D8;   // VERIFIED  ERaceEventModeType: TimeTrial 2 seen live; PrecisionDriving 8 (dump)
-    byte   hudSuccess       : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x1D4;   // VERIFIED  bIsSuccess — finish outcome
-    // long   trackNamePtr     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x28, 0x50;        // PARTIAL  track -> InternalName: OK for Time Trial / Podracing, bad ptr in Precision; campaign = map only ("DAL_SHORT_06"). Use stageName instead
-    int    trackNameLen     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3D8, 0x28, 0x58;        // VERIFIED  FString length (int32 at +0x8)
+    long   hudVM            : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8;          // HAVE  presence == HUD exists
+    int    hudLap           : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x16C;   // HAVE  CurrentLapNumber as shown on HUD: starts at 1
+    double hudLapTime       : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x178;   // VERIFIED  CurrentLapTime: raw lap IGT, resets each lap, no Precision deductions
+    double hudEventTime     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x188;   // VERIFIED  CurrentEventTime: running event IGT with Precision gate deductions applied
+    int    hudNumLaps       : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x140;   // VERIFIED  NumLaps: matches totalLaps; 100 in Elimination events (hidden on the HUD)
+    byte   hudModeType      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x0D8;   // VERIFIED  ERaceEventModeType: TimeTrial 2 seen live; PrecisionDriving 8 (dump)
+    byte   hudSuccess       : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x1D4;   // VERIFIED  bIsSuccess — finish outcome
+    // long   trackNamePtr     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x28, 0x50;        // PARTIAL  track -> InternalName: OK for Time Trial / Podracing, bad ptr in Precision; campaign = map only ("DAL_SHORT_06"). Use stageName instead
+    int    trackNameLen     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3D8, 0x28, 0x58;        // VERIFIED  FString length (int32 at +0x8)
 
     //--- C. UPlayerRaceEventComponent  (GWorld -> OwningGameInstance -> LocalPlayers[0] -> PlayerController -> PlayerState -> RaceEventComponent)
-    int    playerLap          : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // HAVE  CurrentLapNumber: 0 until first crossing; LapCount+1 after the finish; 0 after leaving
-    byte   finished           : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // HAVE  bHasFinishedEvent: 0 -> 1 on the final crossing. End trigger for EVERY category
-    float  finishTime         : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // HAVE  EventFinishTime: -1 until the finish, then the results-screen time (Precision: already adjusted)
-    float  bonusTime          : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF4; // VERIFIED  BonusTime: running total of Precision gate deductions, +1.5 per gate
-    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // HAVE  LapStartServerTime: stamp at each crossing; dead-race guard
-    int    eventPosition      : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xC4;  // VERIFIED  EventPosition — campaign "must win"?
-    byte   failReasons        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0x120; // VERIFIED  ERaceFailReason bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16
-    // byte   timedOut           : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCD;  // LEAD  bHasTimedOut
-    byte   wrecked            : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCF;  // VERIFIED  bHasVehicleWrecked: 1 = wrecked out of the race for good (not a respawnable crash)
-    byte   eliminated         : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD0;  // VERIFIED  bHasBeenEliminated
-    float  bestLapTime        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF8;  // VERIFIED  BestLapTime — display only
-    float  prevLapTime        : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xFC;  // VERIFIED  PreviousLapTime — display only
+    int    playerLap          : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD4; // HAVE  CurrentLapNumber: 0 until first crossing; LapCount+1 after the finish; 0 after leaving
+    byte   finished           : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCC; // HAVE  bHasFinishedEvent: 0 -> 1 on the final crossing. End trigger for EVERY category
+    float  finishTime         : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF0; // HAVE  EventFinishTime: -1 until the finish, then the results-screen time (Precision: already adjusted)
+    float  bonusTime          : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF4; // VERIFIED  BonusTime: running total of Precision gate deductions, +1.5 per gate
+    double lapStartServerTime : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xE8; // HAVE  LapStartServerTime: stamp at each crossing; dead-race guard
+    int    eventPosition      : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xC4;  // VERIFIED  EventPosition — campaign "must win"?
+    byte   failReasons        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0x120; // VERIFIED  ERaceFailReason bitflags: Wrecked 1, ModeRules 2, HighRisk 4, ExtraConditions 8, MissedRequiredWin 16
+    // byte   timedOut           : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCD;  // LEAD  bHasTimedOut
+    byte   wrecked            : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xCF;  // VERIFIED  bHasVehicleWrecked: 1 = wrecked out of the race for good (not a respawnable crash)
+    byte   eliminated         : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xD0;  // VERIFIED  bHasBeenEliminated
+    float  bestLapTime        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xF8;  // VERIFIED  BestLapTime — display only
+    float  prevLapTime        : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x228, 0x38, 0x0, 0x30, 0x2B8, 0x368, 0xFC;  // VERIFIED  PreviousLapTime — display only
 
     //--- D. Event identity  (GameState + 0x3F8 EventRecipe.EventStages -> FRaceEventInstance[ActiveStage]).
     //    EventStages is TArray<FRaceEventInstance>: elements are INLINE (0x308 bytes each), so there is NO deref after the data ptr.
     //    Stage 0 shown (single-race events). Stage N = data ptr + N * 0x308; state{} can't index, so read it in update{} if Scenarios need it.
-    long      stageNamePtr  : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x10;          // VERIFIED  FRaceEventInstance.InternalName FString data ptr
-    string128 stageName     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x10, 0x0;     // VERIFIED  InternalName text (UTF-16). Arcade "EVT_ARC_PRE_BIKE_MAS_A_FWD"; campaign "DAL_SHORT_06_TeamRace_Dry". EventId (M6 / M7)
-    int    stageNameLen     : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x18;        // VERIFIED  FString length
-    long   authoredEvent    : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58;        // VERIFIED  URaceEventDef* — class check (UArcadeEventDef vs campaign def)
-    byte      arcadeCategory: "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58, 0x321;   // VERIFIED  EArcadeEventCategories: Plane 2 (Podracing) seen live, Precision 4. Undefined in campaign (def isn't an arcade def)
-    byte      skipCountdown : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x58, 0xB8;    // VERIFIED  (arcade)  URaceEventDef.bShouldSkipCountdown — rolling vs grid start. Undefined in campaign
-    byte      stageLapCount : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x3F8, 0x30;          // VERIFIED  FRaceEventInstance.LapCount — matches totalLaps (100 in Elimination)
+    long      stageNamePtr  : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x10;          // VERIFIED  FRaceEventInstance.InternalName FString data ptr
+    string128 stageName     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x10, 0x0;     // VERIFIED  InternalName text (UTF-16). Arcade "EVT_ARC_PRE_BIKE_MAS_A_FWD"; campaign "DAL_SHORT_06_TeamRace_Dry". EventId (M6 / M7)
+    int    stageNameLen     : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x18;        // VERIFIED  FString length
+    long   authoredEvent    : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x58;        // VERIFIED  URaceEventDef* — class check (UArcadeEventDef vs campaign def)
+    byte      arcadeCategory: "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x58, 0x321;   // VERIFIED  EArcadeEventCategories: Plane 2 (Podracing) seen live, Precision 4. Undefined in campaign (def isn't an arcade def)
+    byte      skipCountdown : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x58, 0xB8;    // VERIFIED  (arcade)  URaceEventDef.bShouldSkipCountdown — rolling vs grid start. Undefined in campaign
+    byte      stageLapCount : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x3F8, 0x30;          // VERIFIED  FRaceEventInstance.LapCount — matches totalLaps (100 in Elimination)
 
     //--- E. Campaign  (UCampaignSubsystem — GameInstance subsystem. Chain TBD: UGfnGameInstance::GetCampaignManager(); see DEV_NOTES "Campaign start triggers")
     // byte   playingPrologue    : ???, 0xC1;   // VERIFIED (field) / FIND (chain)  bIsPlayingPrologue: 0 -> 1 on "Start New Campaign" AND on reset "Accept" (M1, M2)
@@ -106,8 +106,8 @@ state("SWGR-Win64-Shipping")
     // byte   medalResult         : ???;   // DEFERRED (M8)  Bronze beaten on the finished event. Not an MVP check — the moderator sees the medal. Only if runners ask.
 
     //--- G. Engine / misc
-    // long   pauserPlayerState : "SWGR-Win64-Shipping.exe", 0xADFF928, ???, ???, ???;   // LEAD  AWorldSettings.PauserPlayerState via UWorld -> PersistentLevel -> WorldSettings. Non-null while paused (UE standard)
-    // double worldTime         : "SWGR-Win64-Shipping.exe", 0xADFF928, 0x1B0, 0x2E0;   // VERIFIED-BAD  ReplicatedWorldTimeSecondsDouble LAGS the crossing stamps — not a live clock (BUGS.md #1). Do not use.
+    // long   pauserPlayerState : "SWGR-Win64-Shipping.exe", 0x0AE0C968, ???, ???, ???;   // LEAD  AWorldSettings.PauserPlayerState via UWorld -> PersistentLevel -> WorldSettings. Non-null while paused (UE standard)
+    // double worldTime         : "SWGR-Win64-Shipping.exe", 0x0AE0C968, 0x1B0, 0x2E0;   // VERIFIED-BAD  ReplicatedWorldTimeSecondsDouble LAGS the crossing stamps — not a live clock (BUGS.md #1). Do not use.
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
