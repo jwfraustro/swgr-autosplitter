@@ -171,14 +171,10 @@ Open issues with the autosplitter. Dev-facing; addresses are in `MEMORY_OFFSETS.
   is **raw** elapsed time; the finish snap to `EventFinishTime` is **adjusted**. All 57 s of
   deductions therefore landed in the last lap. v0.4.1 does the same (never checked on a
   multi-lap Precision event; the final time was always right).
-- **Fix (2026-10-21, refactor only):** a `Cat_Precision`-only branch in `gameTime{}` handles the
-  lap edge: Game Time = `raw − bonusTime`. `BonusTime` is the running total of deductions and is
-  settled by the crossing (gates are mid-lap). Its 0.5 s garbage guard compares raw with raw:
-  `raw` vs the running Game Time plus the bonus taken off at the previous re-sync
-  (`Run.LapSyncBonus`, reset per race). The shared lap-edge block below it is v0.4.1 verbatim,
-  so every other category is untouched.
-- **Known, accepted:** between crossings Game Time still runs on real time, so the live display
-  does not drop by 1.5 s at each gate the way the in-game timer does; it catches up at the next
-  crossing and the finish. A live game-driven clock (`CurrentEventTime`, BUGS.md #1) would fix
-  the display.
-- **Status:** fixed in the refactor script, untested.
+- **Fix (2026-10-22, refactor only):** a `Cat_Precision`-only branch in `gameTime{}` returns the
+  HUD's `CurrentEventTime` (`hudEventTime`) every tick. It already drops by 1.5 s as each gate is
+  passed, so lap splits, the live display and pauses are all right with no bookkeeping. (An
+  intermediate fix that subtracted `bonusTime` at each lap edge was tried first and dropped.)
+  The shared lap-edge block is v0.4.1 verbatim, so every other category is untouched.
+- **Status:** fixed and tested 2026-10-22 (2-lap Precision event, laps and final match the game).
+  Opens the door to doing the same for the other categories (#1 live jitter).

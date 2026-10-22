@@ -315,7 +315,7 @@ init
     vars.LapIgt = (Func<dynamic, double>)((s) => (double)s.hudLapTime);
 
     // Exact elapsed race time at the last crossing: LapStamp - RaceStamp. RaceStamp = first-crossing stamp (Arcade) or countdown end (grid).
-    // Raw: the stamps know nothing about Precision gate deductions (gameTime{}'s Precision branch subtracts bonusTime).
+    // Raw: the stamps know nothing about Precision gate deductions (Precision's gameTime{} uses hudEventTime instead).
     vars.LapSplitIgt = (Func<dynamic, double>)((s) => (double)s.LapStamp - (double)s.RaceStamp);
 
     // Final adjusted time: finishTime (-1 before the finish). Precision: gate deductions already applied.
@@ -460,7 +460,6 @@ init
         r.LastEventId         = "";      // identity of the race last entered
         r.LastMapId           = "";
         r.LastRaceStamp       = 0.0;     // RaceStamp of the race last booked by OnRaceEntered (so RaceEnteredEdge fires once per race)
-        r.LapSyncBonus        = 0.0;     // Precision Driving only: bonusTime taken off Game Time at the last lap-edge re-sync (gameTime{}'s Precision branch)
         r.DeadRaceStamp       = 0.0;     // torn-down race's RaceStartTime        (BUGS.md #2)
         r.DeadLapStamp        = 0.0;     // torn-down race's LapStartServerTime   (BUGS.md #2)
         vars.Run = r;
@@ -482,7 +481,6 @@ init
     {
         vars.Run.LastEventId   = n.EventId;
         vars.Run.LastMapId     = n.MapId;
-        vars.Run.LapSyncBonus  = 0.0;
         vars.Run.LastRaceStamp = n.RaceStamp;
         vars.Log("race entered: " + n.EventId + "  RaceStamp " + n.RaceStamp + "  laps " + n.totalLaps + "  flow " + n.Flow);
     });
@@ -631,25 +629,12 @@ gameTime
         return TimeSpan.FromSeconds(run.IgtTotal);
     }
 
-    // Precision Driving ONLY (BUGS.md #7): the crossing stamps are raw, the ranked time is not. bonusTime (1.5 s per gate, running total, settled by
-    // the crossing since gates are mid-lap) comes off at each lap edge, so each lap split carries its own gates' deductions instead of the finish snap
-    // dumping all of them into the last lap. Game Time runs on real time between crossings, so the 0.5 s garbage guard compares raw with raw: the
-    // running Game Time plus the bonus already taken off at the previous re-sync (Run.LapSyncBonus, zeroed per race).
-    // Handles the lap edge completely for Precision — the shared v0.4.1 block below is not reached.
-    if (settings["Cat_Precision"] && vars.LapEdge(p, n) && n.LapStamp != p.LapStamp)
+    // Precision Driving ONLY (BUGS.md #7): Game Time IS the HUD's CurrentEventTime, every tick. The crossing stamps are raw but this value already
+    // has the 1.5 s gate deductions taken off as each gate is passed, so lap splits, the live display and pauses all come out right for free.
+    // (Tested 2026-10-22.) The shared v0.4.1 lap-edge block below is not reached.
+    if (settings["Cat_Precision"])
     {
-        double raw        = vars.LapSplitIgt(n);
-        double bonus      = (double)n.bonusTime;
-        double lapElapsed = raw - bonus;
-        double running    = timer.CurrentTime.GameTime.HasValue ? timer.CurrentTime.GameTime.Value.TotalSeconds : -1;
-        double rawRunning = running + run.LapSyncBonus;
-        vars.Log("lap edge (Precision): stamp - RaceStamp " + raw + "  bonus " + bonus + "  -> Game Time " + lapElapsed + "  running " + running + "  raw correction " + (raw - rawRunning));
-        if (raw > 0 && Math.Abs(raw - rawRunning) < 0.5)
-        {
-            run.LapSyncBonus = bonus;
-            return TimeSpan.FromSeconds(lapElapsed);
-        }
-        return null;   // real time until the next crossing / the finish snap
+        return TimeSpan.FromSeconds(n.hudEventTime);
     }
 
     // Lap crossings (v0.4.1): the game stamps LapStartServerTime at the crossing, so stamp - RaceStartTime is the exact elapsed race time
@@ -664,7 +649,8 @@ gameTime
             return TimeSpan.FromSeconds(lapElapsed);
     }
 
-    // TODO(step8): live — return TimeSpan.FromSeconds(vars.RunGameTime(n)) every tick, if hudEventTime proves smooth at 60 Hz (BUGS.md #1 live jitter).
+    // TODO(step8): live — return TimeSpan.FromSeconds(vars.RunGameTime(n)) every tick for the other categories too; hudEventTime is live and smooth
+    // in Precision (above), so the same would remove the real-time jitter between crossings everywhere (BUGS.md #1).
     return null;   // real time between crossings (v0.4.1 behaviour)
 }
 
@@ -745,7 +731,7 @@ onStart
 {
     // Fires for script starts AND manual starts. A fresh run: zero the totals, Phase = Running.
     dynamic run = vars.Run;
-    run.IgtTotal = 0.0; run.EventsDone = 0; run.LapSyncBonus = 0.0;
+    run.IgtTotal = 0.0; run.EventsDone = 0;
     run.Phase = "Running";
     vars.Log("timer started  (" + (run.Profile != null ? run.Profile.Name : "no profile") + ")  flow " + vars.Now.Flow);
 }

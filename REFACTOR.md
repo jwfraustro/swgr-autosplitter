@@ -110,10 +110,9 @@ Dead-stamp capture runs on every teardown in both families.
   machine is a Debug cross-check for ILs, not a replacement (the crossing-based ILs must not
   change behaviour).
 - `gameTime{}` between crossings is real time, re-synced to the stamps on lap edges (within a
-  0.5 s garbage guard) and snapped to `EventFinishTime` on the finish. Precision Driving has its
-  own lap-edge branch ahead of the shared one: the stamps are raw, so the running `bonusTime`
-  comes off and the lap splits carry their own gate deductions (BUGS.md #7). The shared block
-  stays v0.4.1 verbatim.
+  0.5 s garbage guard) and snapped to `EventFinishTime` on the finish. Precision Driving is the
+  exception: its branch returns the HUD's `CurrentEventTime` every tick, which already carries
+  the gate deductions (BUGS.md #7). The shared block stays v0.4.1 verbatim.
 - Category-specific behaviour goes in an explicit branch for that category (as the Precision
   one), not into the shared path via a field that "happens to be 0 elsewhere" or a profile flag
   only one row uses. An empty end-event
@@ -171,8 +170,8 @@ IGT sum rather than the last race's time.
       runner's last split.
 - [ ] Step 6: fill `EVENT_SEBULBA_FINAL` / `EVENT_KESTAR_FINAL` once the names are found.
 - [ ] S4: record whether Act III "Start Run" goes 2→3→4 or 2→4 (both are handled).
-- [ ] Step 7, only if wanted: `IsPaused` (`AWorldSettings.PauserPlayerState` via
-      UWorld → PersistentLevel → WorldSettings), live `EventIgt` as in-race Game Time (needs
-      `hudEventTime` smooth at 60 Hz; BUGS.md #1), versioned `state` blocks for patches,
+- [ ] Step 7, only if wanted: live `EventIgt` as in-race Game Time for the other categories
+      (Precision already does it and `hudEventTime` is smooth; it would also give pause
+      handling for free, so `IsPaused` is probably moot), versioned `state` blocks for patches,
       `EventKind` mismatch warning, medal check on E3.
 - Mock testing harness: `testing/` (`swgr_mock.py`, `test_time_trial.py`, `run.py`).
