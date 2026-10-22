@@ -1,11 +1,7 @@
 # Autosplitter dev notes
 
 Game facts the script relies on, found by datamining or in play. Companion files:
-`MEMORY_OFFSETS.md` (every address), `REFACTOR.md` (script design, start/end/reset tables,
-category profiles), `BUGS.md`.
-
-> Eventually this becomes the user-facing doc on how the autosplitter behaves in each
-> category; keep **Categories** written so it can be lifted out.
+`MEMORY_OFFSETS.md` (every address)
 
 ## Categories (speedrun.com, mods' rules as of 2026-10-21)
 
@@ -129,25 +125,9 @@ CinematicRecap 3, RollingRestart 4, Racing 5.
 
 `EIgnitionPhase`: Offline 0, EngineIgnite 1, PerfectStart 2, PostPerfectStart 3.
 
-## Research hooks (UE4SS only; the ASL must not depend on them)
-
-- `UGameplayActionSubsystem.OnRacerLapFinished` → `{ Player, CompletedLapCount }`;
-  `OnRacerFinished` → `{ Player, EventPlayed, FinishPosition, FinishTime, bUsedCheats }`.
-- `ARacingGameMode::RacerCrossedCheckpoint(Vehicle, checkpoint, isEndOfLap)`;
-  `UVehicleRouteMarker.OnCrossedCheckpoint`.
-- `ARacingGameState` delegates `OnRaceStarted`, `OnLocalPlayerReachedFinalEventPhase`.
 
 ## Open
 
 - [ ] `stageName`s for the Sebulba final and the Kestar final (The Experiment is known).
 - [ ] Fixed pointer chain to `UCampaignSubsystem`; `MainCampaignCurrentTourIx` value for Act III.
-- [ ] Record the flow sequence for Arcade "Start Event", the campaign-reset Accept (main menu
-      and paddock), Act III "Start Run"; whether `PaddockNarrative` appears in normal paddock
-      play; `flowRecordCount` in the paddock; GFSM is `BlueprintCreatedComponents[0]` in the
-      third GameState Blueprint.
-- [ ] Elimination events: lap splits and finish behaviour (BUGS.md #3).
-- [ ] Scenarios: a full 5-race run on the 2026-10-21 profile (grid-go start, Game Time paused
-      through loads and countdowns, lap + finish splits, no end condition).
-- [ ] Pause flag (`PauserPlayerState`) for an optional pause setting.
-- [ ] Arcade medal result (M8), only if a Bronze check is ever wanted.
 - [ ] Sigscan for `GWorld` (or versioned `state` blocks) so patches don't break the script.
