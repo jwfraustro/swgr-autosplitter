@@ -26,7 +26,7 @@ grid-start race, and appear both as single events and inside Arcade%.
 |---|---|---|
 | Arcade Time Trial / Precision | first start-line crossing (rolling start) | final-lap finish |
 | Arcade podrace | grid released (countdown over) | final-lap finish |
-| Arcade Scenarios (5 races, fixed character) | first race's go (nothing before it is timed) | finish of the 5th race |
+| Arcade Scenarios (5 races, fixed character) | first race's go (nothing before it is timed) | finish of the 5th race (the script has no end condition here: lay out your splits to match your route and the last split ends the run) |
 | Arcade% (all 50 events in order; 3 Deluxe excluded; retries allowed) | "Start Event" on *Landspeeder Ace* | finish of *The Experiment* with Bronze beaten |
 | Sebulba% / Any% (fresh save, any difficulty) | "Start New Campaign" | final-lap finish vs Sebulba (Act 1) / Kestar's Podracer (Act 3) |
 | NG+ Sebulba% / Any% / Champion% | "Accept" on the campaign-reset "Are you sure?" | as above |
@@ -146,7 +146,8 @@ CinematicRecap 3, RollingRestart 4, Racing 5.
       play; `flowRecordCount` in the paddock; GFSM is `BlueprintCreatedComponents[0]` in the
       third GameState Blueprint.
 - [ ] Elimination events: lap splits and finish behaviour (BUGS.md #3).
-- [ ] Scenarios: what resets falsely between races (BUGS.md #6).
+- [ ] Scenarios: a full 5-race run on the 2026-10-21 profile (grid-go start, Game Time paused
+      through loads and countdowns, lap + finish splits, no end condition).
 - [ ] Pause flag (`PauserPlayerState`) for an optional pause setting.
 - [ ] Arcade medal result (M8), only if a Bronze check is ever wanted.
 - [ ] Sigscan for `GWorld` (or versioned `state` blocks) so patches don't break the script.

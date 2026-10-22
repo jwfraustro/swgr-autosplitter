@@ -1,9 +1,10 @@
 //=====================================================================================================================================================================================================
 // Star Wars: Galactic Racer — LiveSplit autosplitter (refactor)
 // Version: 0.5.0-dev  — migration steps 1–5 implemented (REFACTOR.md). IL family (Time Trial, Precision) behaves like v0.4.1 except that
-//                       Elimination events (100 laps) pass LapsSane (BUGS.md #3). Run-length family (Arcade%, Scenarios, campaign): start on
-//                       leaving the menu, split once per finished event, never auto-reset; Arcade% and Scenarios have their end conditions,
-//                       the campaign ends still need event names (step 6). UNTESTED in LiveSplit as of 2026-10-20.
+//                       Elimination events (100 laps) pass LapsSane (BUGS.md #3). Run-length family (Arcade%, campaign): start on leaving
+//                       the menu, split once per finished event, never auto-reset; Arcade% has its end condition, the campaign ends still
+//                       need event names (step 6). Scenarios: grid-go start, Game Time = IGT sum (frozen outside a live race), split on
+//                       every lap and finish, no end condition (the runner's split count ends the run). UNTESTED in LiveSplit as of 2026-10-21.
 //                       Will replace SWGR_Autosplitter.asl (v0.4.1) when finished.
 //
 // READ FIRST
@@ -127,9 +128,9 @@ startup
     // Run-length categories: the timer starts the moment you leave the menu (any 'Start Event' / 'Start' / 'New Campaign' / reset 'Accept').
     // The script does not check WHICH event you started on — the moderator does, from the video. A wrong start is your reset.
     settings.Add("Cat_Scenarios",    false, "Arcade Scenarios",           "Category");
-        settings.SetToolTip("Cat_Scenarios",    "5 races in sequence. RTA. Starts when you leave the menu; splits per race; ends on the 5th distinct race's finish (a redone race is not counted twice). Never auto-resets.");
+        settings.SetToolTip("Cat_Scenarios",    "5 races in sequence. IGT: Game Time runs only during a live race (countdowns, loads and menus between races are not counted). Starts on the first race's go; splits on every lap and every finish; no end condition — the run ends when your last split is hit, so lay out your splits to match (e.g. 5 races x N laps, or 5 race splits with lap splits off). Never auto-resets.");
     settings.Add("Cat_ArcadePct",    false, "Arcade%",                    "Category");
-        settings.SetToolTip("Cat_ArcadePct",    "All events in order. RTA. Starts when you leave the menu; splits once per event (redoing an event does not split again); ends on The Experiment's finish. Never auto-resets.");
+        settings.SetToolTip("Cat_ArcadePct",    "All events in order. RTA. Starts when you leave the menu; splits on every finish (a redone event splits again — skip or undo the split yourself); ends on The Experiment's finish. Never auto-resets.");
     settings.Add("Cat_SebulbaPct",   false, "Sebulba%",                   "Category");
         settings.SetToolTip("Cat_SebulbaPct",   "Fresh save. RTA. Starts when you leave the menu ('Start New Campaign'); ends on the final-lap finish vs Sebulba (last race of Act I). End event name still to be found.");
     settings.Add("Cat_AnyPct",       false, "Any%",                       "Category");
@@ -147,7 +148,7 @@ startup
     settings.Add("LapSplits",   true,  "Split on each lap");
         settings.SetToolTip("LapSplits",   "Splits on every completed lap except the last (the finish / race split covers that).");
     settings.Add("RaceSplits",  true,  "Split on each race / event (run-length categories)");
-        settings.SetToolTip("RaceSplits",  "Splits when a race or event finishes and the run is not over — once per event: finishing the same event again (a redo) adds its time but does not split.");
+        settings.SetToolTip("RaceSplits",  "Splits on every race or event finish while the run is not over. A redone event splits again: skip or undo the split yourself.");
     settings.Add("FinishSplit", true,  "Split on the run's final finish");
         settings.SetToolTip("FinishSplit", "Splits when the category's end condition is met.");
 
@@ -176,7 +177,6 @@ startup
     vars.EVENT_KESTAR_FINAL    = "";   // FIND  the Kestar's Podracer race, last race of Act III (E5). "" = end condition can never fire
 
     vars.PRECISION_GATE_SECONDS = 1.5; // The number of seconds a player's race time is reduced by in Precision Driving
-    vars.SCENARIO_RACE_COUNT    = 5; // The number of races in an Arcade Scenario
 
     // Flow state machine (A0). Machine from the state-id enum's entry count (VERIFIED 2026-10-19); state ids from Griffin_enums.hpp.
     vars.FlowMachines = new Dictionary<int, string> { { 37, "Race" }, { 16, "FrontEnd" }, { 9, "Paddock" }, { 4, "PaddockNarrative" } };   // EPvpFlowState (>=14) not needed: singleplayer only
@@ -257,12 +257,16 @@ init
     // Player crossed the final line: finished 0 -> 1. EventFinishTime lands on the same tick.
     vars.FinishEdge = (Func<dynamic, dynamic, bool>)((p, n) => n.Finished && !p.Finished);
 
-    // A finish that COUNTS: FinishEdge with a real time, and not the torn-down race's memory replaying. While the next level loads, the chain flickers
-    // back to the dead race GameState, which replays finished = 1 with the dead RaceStartTime (BUGS.md #2 for starts, #6 for finishes — seen live in a
-    // Scenario: the first race's finish came back during the second race's load and ended the run again). A dead stamp of 0 means nothing was torn down yet.
+    // A finish that COUNTS: FinishEdge with a real time, in a live race with a real RaceStartTime, and not the torn-down race's memory replaying.
+    // While the next level loads, the chain flickers back to the dead race GameState and replays finished = 1 (BUGS.md #2 for starts, #6 for finishes).
+    // Seen live in a Scenario (2026-10-20/21): once with the dead RaceStartTime (caught by the dead-stamp check) and once more with RaceStartTime
+    // read as 0, HUD VM gone and EventId empty — a half-torn-down state that no stamp comparison can catch, hence the InRace and RaceStamp > 0 guards
+    // (RaceStartTime reads -1 before a start and 0 through a broken chain; a real finish always has the HUD VM and a positive stamp).
+    // A dead stamp of 0 means nothing was torn down yet.
     // Drives bookkeeping, gameTime{}'s finish snap, the race split and every run-length end condition. E1 (IL) stays on the raw v0.4.1 edge.
     vars.ValidFinishEdge = (Func<dynamic, dynamic, bool>)((p, n) =>
-        vars.FinishEdge(p, n) && n.FinishIgt >= 0 && (vars.Run.DeadRaceStamp == 0.0 || n.RaceStamp != vars.Run.DeadRaceStamp));
+        vars.FinishEdge(p, n) && n.FinishIgt >= 0 && vars.InRace(n) && n.RaceStamp > 0
+        && (vars.Run.DeadRaceStamp == 0.0 || n.RaceStamp != vars.Run.DeadRaceStamp));
 
     // Player failed the event: Failed false -> true. Debug only — no reset policy uses it (an IL retry goes through R1).
     vars.FailEdge = (Func<dynamic, dynamic, bool>)((p, n) => n.Failed && !p.Failed);
@@ -291,7 +295,7 @@ init
     vars.FlowLeave = (Func<dynamic, dynamic, string, int, bool>)((p, n, machine, state) => p.Flow != n.Flow && p.FlowMachine == machine && p.FlowState == state);
 
     // Left the menu: the FrontEnd / Paddock machine gave way to Race, or to "None" (the GameState is gone for the level load).
-    // This IS the RTA start for every run-length category ("Start Event", scenario "Start", "New Campaign", campaign-reset "Accept") — within one poll
+    // This IS the RTA start for the RTA run-length categories ("Start Event", "New Campaign", campaign-reset "Accept") — within one poll
     // of the press, and the timer visibly starts on it. Where the game goes next is deliberately not checked (REFACTOR.md "What the script is for").
     //                                                                                             VERIFIED readings   (S3)
     vars.MenuLeaveEdge = (Func<dynamic, dynamic, bool>)((p, n) => p.InMenu && !n.InMenu);
@@ -339,10 +343,6 @@ init
 
     // Is this the named event?  An empty name never matches (so an unfilled end-event constant can never end a run).
     vars.IsEvent = (Func<dynamic, string, bool>)((s, name) => name != "" && s.EventId == name);
-
-    // Is this finish a SECOND finish of the event finished last (a redo)?  Drives the once-per-event split dedupe (REFACTOR.md "Catalogue", Ends).
-    // Must be evaluated BEFORE OnRaceFinished updates LastFinishedEventId on the same tick; OnRaceFinished stores the answer in Run.FinishIsRepeat.
-    vars.IsRepeatFinish = (Func<dynamic, bool>)((s) => vars.Run.LastFinishedEventId != "" && s.EventId == vars.Run.LastFinishedEventId);
 
     // TimeTrial / Precision / Podracing / Scenario / Campaign / Unknown. OPTIONAL — Debug mismatch warning only, never selects behaviour.
     // Definition: arcadeCategory if authoredEvent is an arcade def (Plane 2 -> Podracing, Precision 4 -> Precision, else TimeTrial);
@@ -454,13 +454,11 @@ init
         dynamic r = new System.Dynamic.ExpandoObject();
         r.Profile             = null;    // set by vars.SelectProfile()
         r.Phase               = "Idle";  // Idle -> Running (onStart) -> Done (end condition split). Nothing finer: where the game is comes from Now.Flow.
-        r.EventsDone          = 0;       // distinct events finished in this run (a redo of the same event does not count)
+        r.EventsDone          = 0;       // finishes booked in this run (log only)
         r.IgtTotal            = 0.0;     // sum of FinishIgt over completed races (the Game Time column for RTA categories)
         r.LastEventId         = "";      // identity of the race last entered
         r.LastMapId           = "";
         r.LastRaceStamp       = 0.0;     // RaceStamp of the race last booked by OnRaceEntered (so RaceEnteredEdge fires once per race)
-        r.LastFinishedEventId = "";      // the event finished last: a second finish of it is a redo (adds IGT, does not split)
-        r.FinishIsRepeat      = false;   // set by OnRaceFinished on the finish tick; read by split{} on the same tick
         r.DeadRaceStamp       = 0.0;     // torn-down race's RaceStartTime        (BUGS.md #2)
         r.DeadLapStamp        = 0.0;     // torn-down race's LapStartServerTime   (BUGS.md #2)
         vars.Run = r;
@@ -486,17 +484,14 @@ init
         vars.Log("race entered: " + n.EventId + "  RaceStamp " + n.RaceStamp + "  laps " + n.totalLaps + "  flow " + n.Flow);
     });
 
-    // On FinishEdge with a valid time: IgtTotal += FinishIgt ALWAYS (the IGT column is driving time, a redo's time included — REFACTOR.md "Invariants");
-    // EventsDone++ only for a new event; remember the event; FinishIsRepeat tells split{} whether this finish deserves a split.
+    // On FinishEdge with a valid time: IgtTotal += FinishIgt ALWAYS (the IGT column is driving time, a redone race's time included — REFACTOR.md "Invariants").
+    // No redo detection: EventId is not a race identity (the Nik Skandaro scenario's races share one), and a redone race is the runner's business.
     // Owns the IgtTotal add — gameTime{} returns Run.IgtTotal on the finish tick and must NOT add again. update{} runs before gameTime{}, so the order holds.
     vars.OnRaceFinished = (Action<dynamic, dynamic>)((p, n) =>
     {
-        bool repeat = vars.IsRepeatFinish(n);
-        vars.Run.IgtTotal           += n.FinishIgt;
-        if (!repeat) vars.Run.EventsDone += 1;
-        vars.Run.LastFinishedEventId = n.EventId;
-        vars.Run.FinishIsRepeat      = repeat;
-        vars.Log("race finished: " + n.EventId + (repeat ? "  (REDO — no split)" : "") + "  FinishIgt " + n.FinishIgt + "  IgtTotal " + vars.Run.IgtTotal
+        vars.Run.IgtTotal   += n.FinishIgt;
+        vars.Run.EventsDone += 1;
+        vars.Log("race finished: " + n.EventId + "  FinishIgt " + n.FinishIgt + "  IgtTotal " + vars.Run.IgtTotal
                  + "  EventsDone " + vars.Run.EventsDone + "  (stamp - RaceStamp " + (n.LapStamp - n.RaceStamp) + ", raw " + vars.RawFinishIgt(n) + ", gates " + n.GatesHit + ")");
     });
 
@@ -518,14 +513,13 @@ init
 
     //--- Start states (S#) and end states (E#), each a (p, n) -> bool built from the edges above. Guards shared by all starts live in start{}.
     Func<dynamic, dynamic, bool> S1_FirstCrossing   = (p, n) => vars.FirstCrossingEdge(p, n);     // HAVE            Time Trial, Precision
-    Func<dynamic, dynamic, bool> S2_GridGo          = (p, n) => vars.RaceGoEdge(p, n);            // HAVE            Podracing (disabled per moderators)
+    Func<dynamic, dynamic, bool> S2_GridGo          = (p, n) => vars.RaceGoEdge(p, n);            // HAVE            Scenarios (first race's go); podraces once revived
     Func<dynamic, dynamic, bool> S3_MenuLeave       = (p, n) => vars.MenuLeaveEdge(p, n);
     Func<dynamic, dynamic, bool> S4_ActIIIStartRun  = (p, n) => vars.ActIIIStartRunEdge(p, n);
 
+    Func<dynamic, dynamic, bool> E0_Never           = (p, n) => false;                                                                      // Scenarios: no end condition; the runner's split count ends the run (LiveSplit stops at the last split)
     Func<dynamic, dynamic, bool> E1_SingleFinish    = (p, n) => vars.FinishEdge(p, n);                                                     // HAVE      all ILs
-    // E2–E5 use ValidFinishEdge so a replayed finish (BUGS.md #6) can't end the run. E2 counts distinct finished races: OnRaceFinished has already
-    // incremented EventsDone on this tick (update{} runs first), so "the 5th race just finished" is EventsDone >= 5 and this finish wasn't a redo.
-    Func<dynamic, dynamic, bool> E2_FifthRace       = (p, n) => vars.ValidFinishEdge(p, n) && !vars.Run.FinishIsRepeat && vars.Run.EventsDone >= vars.SCENARIO_RACE_COUNT;   // rules: 5 races
+    // E3–E5 use ValidFinishEdge so a replayed finish (BUGS.md #6) can't end the run.
     Func<dynamic, dynamic, bool> E3_TheExperiment   = (p, n) => vars.ValidFinishEdge(p, n) && vars.IsEvent(n, vars.EVENT_THE_EXPERIMENT);
     Func<dynamic, dynamic, bool> E4_SebulbaFinal    = (p, n) => vars.ValidFinishEdge(p, n) && vars.IsEvent(n, vars.EVENT_SEBULBA_FINAL);    // name FIND — never fires until filled in
     Func<dynamic, dynamic, bool> E5_KestarFinal     = (p, n) => vars.ValidFinishEdge(p, n) && vars.IsEvent(n, vars.EVENT_KESTAR_FINAL);     // name FIND — never fires until filled in
@@ -534,8 +528,8 @@ init
     vars.Profiles = new Dictionary<string, dynamic>();
     vars.Profiles["Cat_TimeTrial"]    = vars.MakeProfile("Arcade — Time Trial",        "IL",  "IGT",    S1_FirstCrossing,   "Lap",  E1_SingleFinish,      true,  false, "TimeTrial");
     vars.Profiles["Cat_Precision"]    = vars.MakeProfile("Arcade — Precision Driving", "IL",  "IGT",    S1_FirstCrossing,   "Lap",  E1_SingleFinish,      true,  false, "Precision");
-    // vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Tales of Podracing",         "IL",  "IGT",    S2_GridGo,          "Race", E1_SingleFinish,      true,  false, "Podracing");
-    vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "Run", "RTA",    S3_MenuLeave,       "None", E2_FifthRace,         false, true,  "Scenario");
+    // vars.Profiles["Cat_Podracing"]    = vars.MakeProfile("Arcade — Podrace",           "IL",  "IGT",    S2_GridGo,          "Race", E1_SingleFinish,      true,  false, "Podracing");
+    vars.Profiles["Cat_Scenarios"]    = vars.MakeProfile("Arcade Scenarios",           "Run", "IGT",    S2_GridGo,          "Race", E0_Never,             true,  true,  "Scenario");
     vars.Profiles["Cat_ArcadePct"]    = vars.MakeProfile("Arcade%",                    "Run", "RTA",    S3_MenuLeave,       "None", E3_TheExperiment,     false, true,  "");
     vars.Profiles["Cat_SebulbaPct"]   = vars.MakeProfile("Sebulba%",                   "Run", "RTA",    S3_MenuLeave,       "None", E4_SebulbaFinal,      false, true,  "Campaign");
     vars.Profiles["Cat_AnyPct"]       = vars.MakeProfile("Any%",                       "Run", "RTA",    S3_MenuLeave,       "None", E5_KestarFinal,       false, true,  "Campaign");
@@ -579,8 +573,9 @@ update
     string phaseBefore = vars.Run.Phase;
     vars.CaptureDeadStamps(p, n);               // every teardown, regardless of family (BUGS.md #2 happens between Scenario races too)
     if (vars.RaceEnteredEdge(p, n)) vars.OnRaceEntered(p, n);
-    if (vars.ValidFinishEdge(p, n)) vars.OnRaceFinished(p, n);   // every finish that counts, redo or not (the dedupe is inside)
-    else if (vars.FinishEdge(p, n)) vars.Log("finish ignored: finishTime " + n.FinishIgt + "  RaceStamp " + n.RaceStamp + (n.RaceStamp == vars.Run.DeadRaceStamp ? " == dead race (replay, BUGS.md #6)" : ""));
+    if (vars.ValidFinishEdge(p, n)) vars.OnRaceFinished(p, n);   // every finish that counts
+    else if (vars.FinishEdge(p, n)) vars.Log("finish ignored: finishTime " + n.FinishIgt + "  RaceStamp " + n.RaceStamp + "  InRace " + n.InRace
+                                             + (n.RaceStamp == vars.Run.DeadRaceStamp ? "  == dead race (replay, BUGS.md #6)" : !n.InRace || n.RaceStamp <= 0 ? "  not a live race (replay, BUGS.md #6)" : ""));
 
     // Debug: print raw edges (port of v0.4.1 update{}) and derived edges.
     if (settings["Debug"])
@@ -606,10 +601,13 @@ isLoading
 {
     dynamic n = vars.Now, run = vars.Run;
     // IL (v0.4.1, verbatim): freeze after the finish so the value set in gameTime{} stays exact.
-    // Run-length: also freeze whenever we are not in a live race, so Game Time stops through menus and loads (the IGT-sum column).
+    // Run-length: also freeze whenever we are not in a LIVE race, so Game Time stops through menus, loads and the grid countdown (the IGT-sum
+    //   column, and the whole Game Time for Scenarios). Live = in race and the clock has started: grid released (raceStarted, grid events) or
+    //   first crossing (playerLap >= 1, rolling starts where bIsRaceStarted may never be set). Without the live check the countdown before
+    //   each grid race would be timed, and the lap-edge re-sync in gameTime{} (0.5 s guard) could not take it back out.
     //   NOT applied to ILs on purpose: in Arcade the HUD VM can appear a tick after the start crossing, and a one-tick freeze there would be a behaviour change.
     bool loading = n.Finished;
-    if (run.Profile != null && run.Profile.Family == "Run" && !n.InRace) loading = true;
+    if (run.Profile != null && run.Profile.Family == "Run" && !(n.InRace && (n.raceStarted == 1 || n.playerLap >= 1))) loading = true;
     // TODO(step8): if (settings["PauseStopsTimer"] && n.Paused) loading = true;
     return loading;
 }
@@ -684,9 +682,9 @@ split
     // E#: the run is over.
     if (run.Profile.IsEnd(p, n)) { run.Phase = "Done"; vars.Log("END (" + run.Profile.Name + ")  IgtTotal " + run.IgtTotal + "  EventsDone " + run.EventsDone); return settings["FinishSplit"]; }
 
-    // Race / event split: a valid finish that isn't the end, once per event. OnRaceFinished (update{}, same tick) decided whether this is a redo.
-    // No medal / fail check: a finish is a finish; redoing the event afterwards simply does not split again.
-    if (run.Profile.SplitOnRace && vars.ValidFinishEdge(p, n) && !run.FinishIsRepeat) return settings["RaceSplits"];
+    // Race / event split: every valid finish that isn't the end. No medal / fail / redo check: a finish is a finish (the runner skips or undoes a split
+    // for a redone event). EventId can't tell races apart anyway — the Nik Skandaro scenario's five races share one.
+    if (run.Profile.SplitOnRace && vars.ValidFinishEdge(p, n)) return settings["RaceSplits"];
 
     // Lap split: lap k -> k+1 for 1 <= k < totalLaps (0 -> 1 is the start crossing; totalLaps -> totalLaps+1 is the finish, handled above).
     if (run.Profile.SplitOnLap && settings["LapSplits"] && vars.LapEdge(p, n)) return true;
@@ -723,7 +721,7 @@ onStart
 {
     // Fires for script starts AND manual starts. A fresh run: zero the totals, Phase = Running.
     dynamic run = vars.Run;
-    run.IgtTotal = 0.0; run.EventsDone = 0; run.LastFinishedEventId = ""; run.FinishIsRepeat = false;
+    run.IgtTotal = 0.0; run.EventsDone = 0;
     run.Phase = "Running";
     vars.Log("timer started  (" + (run.Profile != null ? run.Profile.Name : "no profile") + ")  flow " + vars.Now.Flow);
 }

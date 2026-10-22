@@ -146,5 +146,17 @@ Open issues with the autosplitter. Dev-facing; addresses are in `MEMORY_OFFSETS.
   - Run-length profiles stop splitting once the end has fired (`Phase == Done`).
   - `RaceEnteredEdge` requires `RaceStamp > 0` (`RaceStartTime` reads −1 before the start;
     it was booking a "race entered" with stamp −1).
-- **Status:** fixed in the refactor script, untested. Needs a real scenario with 5 finishes
-  and at least one redone race.
+- **Seen again (2026-10-21, Nik Skandaro scenario, Debug log):** the dead-stamp check caught
+  the first replay (`finish ignored: … == dead race`). During the same load the chain flickered
+  a second time with `RaceStartTime` read as **0**, HUD VM gone, `EventId` empty, and replayed
+  `finished 0 -> 1` with the old `finishTime`. Stamp 0 ≠ dead stamp, so `ValidFinishEdge` passed:
+  `OnRaceFinished` doubled `IgtTotal` (10.32 → 20.64) and `gameTime{}` snapped to it before race
+  two had started. No split, only because `split{}` is gated on `InRace`; the bookkeeping and
+  the snap were not.
+- **Fix (2026-10-21):** `ValidFinishEdge` also requires `InRace` and `RaceStamp > 0`
+  (`RaceStartTime` is −1 before a start and 0 through a broken chain; a real finish always has
+  the HUD VM and a positive stamp). The `finish ignored` log line now says which guard rejected it.
+- **Status:** fixed in the refactor script, untested. E2 and the redo dedupe were both removed
+  2026-10-21 (Scenarios have no end condition and split every lap and finish; the dedupe
+  compared `EventId`s, which the Nik Skandaro scenario's races share, so race two never split).
+  Needs a real scenario with 5 finishes and the IGT checked against the game's own time.
