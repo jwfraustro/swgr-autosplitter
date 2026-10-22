@@ -110,7 +110,13 @@ Dead-stamp capture runs on every teardown in both families.
   machine is a Debug cross-check for ILs, not a replacement (the crossing-based ILs must not
   change behaviour).
 - `gameTime{}` between crossings is real time, re-synced to the stamps on lap edges (within a
-  0.5 s garbage guard) and snapped to `EventFinishTime` on the finish. An empty end-event
+  0.5 s garbage guard) and snapped to `EventFinishTime` on the finish. Precision Driving has its
+  own lap-edge branch ahead of the shared one: the stamps are raw, so the running `bonusTime`
+  comes off and the lap splits carry their own gate deductions (BUGS.md #7). The shared block
+  stays v0.4.1 verbatim.
+- Category-specific behaviour goes in an explicit branch for that category (as the Precision
+  one), not into the shared path via a field that "happens to be 0 elsewhere" or a profile flag
+  only one row uses. An empty end-event
   constant never matches, so an unfilled E4/E5 can't end a run.
 - `isLoading{}`: ILs freeze only after the finish (a one-tick freeze at the Arcade start would be
   a behaviour change); run-length also freezes whenever not in a *live* race: HUD present and

@@ -45,7 +45,7 @@ Open issues with the autosplitter. Dev-facing; addresses are in `MEMORY_OFFSETS.
 - **Rules question for the mods:** a crash before the line plays a slow-mo cinematic and the run
   still counts. In one run `EventFinishTime` was 14.33 but Real Time was 17.285, so Game Time and
   Real Time can differ by seconds.
-- **Precision Driving** will need this anyway (`BonusTime` 0xF4, gate bonuses).
+- **Precision Driving:** lap splits need `BonusTime` taken off — see #7.
 - **Status:** final time fixed in v0.3.0 (Arcade and Race verified). Lap splits exact in v0.4.0 (Arcade and Race verified); live display still jitters between lap crossings.
 
 ## 2. Exiting a race: reset → false start → reset
@@ -160,3 +160,25 @@ Open issues with the autosplitter. Dev-facing; addresses are in `MEMORY_OFFSETS.
   2026-10-21 (Scenarios have no end condition and split every lap and finish; the dedupe
   compared `EventId`s, which the Nik Skandaro scenario's races share, so race two never split).
   Needs a real scenario with 5 finishes and the IGT checked against the game's own time.
+
+## 7. Precision Driving lap splits ignore gate deductions
+
+- **Seen (2026-10-21, refactor, 2-lap Precision event, 38 gates):** final Game Time 1:10.316
+  matched the game. Lap 1 split read 1:04.954 and lap 2 read 0:05.362. The game's time at the
+  lap-1 crossing was far lower (the raw lap was 64.95 s with roughly half the deductions
+  already earned).
+- **Cause:** the lap-edge re-sync set Game Time to `LapStartServerTime − RaceStartTime`, which
+  is **raw** elapsed time; the finish snap to `EventFinishTime` is **adjusted**. All 57 s of
+  deductions therefore landed in the last lap. v0.4.1 does the same (never checked on a
+  multi-lap Precision event; the final time was always right).
+- **Fix (2026-10-21, refactor only):** a `Cat_Precision`-only branch in `gameTime{}` handles the
+  lap edge: Game Time = `raw − bonusTime`. `BonusTime` is the running total of deductions and is
+  settled by the crossing (gates are mid-lap). Its 0.5 s garbage guard compares raw with raw:
+  `raw` vs the running Game Time plus the bonus taken off at the previous re-sync
+  (`Run.LapSyncBonus`, reset per race). The shared lap-edge block below it is v0.4.1 verbatim,
+  so every other category is untouched.
+- **Known, accepted:** between crossings Game Time still runs on real time, so the live display
+  does not drop by 1.5 s at each gate the way the in-game timer does; it catches up at the next
+  crossing and the finish. A live game-driven clock (`CurrentEventTime`, BUGS.md #1) would fix
+  the display.
+- **Status:** fixed in the refactor script, untested.
